@@ -72,37 +72,44 @@ def your_prompt():
 
 def your_config():
     config = {
-        'max_tokens': 50,
+        'max_tokens': 300,
         'temperature': 0.1,
         'top_k': 1,
         'top_p': 1.0,
-        'repetition_penalty': 1.1,
-        'stop': ['\n', 'Q:']
+        'repetition_penalty': 1.0,
+        'stop': ['Q:', 'Question:']
     }
     return config
 
 
 def your_pre_processing(s):
-    # 不再手动加空格，直接返回原始算式
-    return s.strip()
+    s = s.replace("+", " + ")
+    parts = s.split()
+    processed_parts = []
+    for part in parts:
+        if part.isdigit():
+            processed_parts.append(" ".join(list(part)))
+        else:
+            processed_parts.append(part)
+    return " ".join(processed_parts)
 
 
 def your_post_processing(output_string):
-    # 1. 寻找最后一个 "A:" 标记，因为它通常跟在推理步骤之后
-    if "A:" in output_string:
-        output_string = output_string.split("A:")[-1]
 
-    # 2. 清除所有空格、逗号等干扰项
-    cleaned = re.sub(r"[^0-9]", "", output_string).strip()
+    if "Final Answer:" in output_string:
+        output_string = output_string.split("Final Answer:")[-1]
+
+    cleaned = re.sub(r"\s+", "", output_string).replace(",", "").strip()
 
     if not cleaned:
         return 0
 
-    # 3. 在处理后的文本中抓取第一个 7-9 位的长数字
-    match = re.search(r"(\d{7,9})", cleaned)
-    if match:
-        return int(match.group(1))
+    m_long = re.search(r"(\d{7,9})", cleaned)
+    if m_long:
+        return int(m_long.group(1))
 
-    # 4. 兜底逻辑：抓取第一个看到的数字块
-    all_nums = re.findall(r"\d+", cleaned)
-    return int(all_nums[0]) if all_nums else 0
+    nums = re.findall(r"\d+", cleaned)
+    if nums:
+        full_num = ''.join(nums)
+        return int(full_num)
+    return 0

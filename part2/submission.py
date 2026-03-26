@@ -23,11 +23,13 @@ def your_prompt():
         A string.
     Example: a=1111, b=2222, prefix='Input: ', suffix='\nOutput: '
     """
-    # Use carry-heavy 7-digit demonstrations and force terse numeric output.
+    # Use spaced digit addition to reduce tokenizer misalignment, include clear instruction.
     prefix = (
-        "Return only the final sum as digits.\n"
-        "Q:9999999+1010101\nA:11010100\n"
-        "Q:5892625+9415651\nA:15308276\n"
+        "Return only the final sum as digits (space-separated input, no extra words).\n"
+        "Q: 9 9 9 9 9 9 9 + 1 0 1 0 1 0 1\n"
+        "A: 1 1 0 1 0 1 0 0\n"
+        "Q: 5 8 9 2 6 2 5 + 9 4 1 5 6 5 1\n"
+        "A: 1 5 3 0 8 2 7 6\n"
         "Q:"
     )
     suffix = "\nA:"
@@ -56,9 +58,19 @@ def your_config():
 
 
 def your_pre_processing(s):
-    return s.strip()
+    # Convert "1234567+7654321" into spaced form so tokenizer sees per-digit units.
+    cleaned = s.strip().replace(" ", "")
+    spaced = []
+    for ch in cleaned:
+        if ch.isdigit() or ch in "+-":
+            spaced.append(ch)
+        else:
+            spaced.append(ch)
+    # Add spaces between digits but keep + and - as separators.
+    spaced = " ".join(spaced).replace(" + ", " + ").replace(" - ", " - ")
+    return spaced
 
-    
+
 def your_post_processing(output_string):
     """Returns the post processing function to extract the answer for addition
     Returns:

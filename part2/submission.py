@@ -23,8 +23,14 @@ def your_prompt():
         A string.
     Example: a=1111, b=2222, prefix='Input: ', suffix='\nOutput: '
     """
-    # Follow the homework's suggested QA format with one anchor example.
-    prefix = "Question: what is 1234567+1234567?\nAnswer: 2469134\nQuestion: what is "
+    # Keep QA format but add carry-heavy anchors for 7-digit addition stability.
+    prefix = (
+        "Question: what is 3044419+6608684?\n"
+        "Answer: 9653103\n"
+        "Question: what is 1756139+8493797?\n"
+        "Answer: 10249936\n"
+        "Question: what is "
+    )
     suffix = "?\nAnswer:"
 
     return prefix, suffix
@@ -41,9 +47,9 @@ def your_config():
     """
     config = {
         'max_tokens': 50,
-        'temperature': 1.0,
-        'top_k': 50,
-        'top_p': 1.0,
+        'temperature': 0.1,
+        'top_k': 40,
+        'top_p': 0.95,
         'repetition_penalty': 1.0,
         'stop': []}
     
@@ -68,6 +74,24 @@ def your_post_processing(output_string):
     # First line usually contains the answer in this QA format.
     first_line = cleaned.splitlines()[0] if cleaned else ""
 
+    # Prefer explicit "answer" marker if present.
+    m_answer = re.search(r"answer\s*[:=]?\s*([-+]?\d+)", cleaned, flags=re.IGNORECASE)
+    if m_answer:
+        try:
+            return int(m_answer.group(1))
+        except:
+            pass
+
+    # If model emits "...=123", prefer number on the right-hand side.
+    if "=" in first_line:
+        rhs = first_line.split("=")[-1]
+        m_rhs = re.search(r"[-+]?\d+", rhs)
+        if m_rhs:
+            try:
+                return int(m_rhs.group(0))
+            except:
+                pass
+
     # Prefer first integer in the first line (e.g., "10249936" or "The answer is 10249936").
     m_first = re.search(r"[-+]?\d+", first_line)
     if m_first:
@@ -76,11 +100,11 @@ def your_post_processing(output_string):
         except:
             pass
 
-    # Fallback to first integer anywhere in output.
-    m_any = re.search(r"[-+]?\d+", cleaned)
-    if m_any:
+    # Fallback to last integer anywhere in output.
+    all_any = re.findall(r"[-+]?\d+", cleaned)
+    if all_any:
         try:
-            return int(m_any.group(0))
+            return int(all_any[-1])
         except:
             pass
 

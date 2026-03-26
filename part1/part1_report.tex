@@ -1,0 +1,51 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{enumitem}
+\usepackage{hyperref}
+
+\title{CS2590 Homework 3 -- Part 1 Written Report}
+\author{NetID: yy5919, Name: Yvonne Yu}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section*{Q2(b): Counterexamples for Popular Tokenizer Properties}
+Tokenizer used in all three tests: \texttt{google-bert/bert-base-cased} (WordPiece tokenizer from Hugging Face).
+
+\subsection*{1) Not Injective}
+Two different strings can map to the same token sequence.
+\begin{itemize}[leftmargin=1.2em]
+\item Input strings: \texttt{"a b"} and \texttt{"a\ \ b"}
+\item Token IDs (both): \texttt{[170, 171]}
+\end{itemize}
+This violates injectivity because distinct inputs produce identical tokenization outputs.
+
+\subsection*{2) Not Invertible}
+Tokenization + detokenization may not recover the exact original string.
+\begin{itemize}[leftmargin=1.2em]
+\item Input string: \texttt{"hello\ \ \ world"}
+\item Encoded IDs: \texttt{[19082, 1362]}
+\item Decoded string: \texttt{"hello world"}
+\end{itemize}
+The original had three spaces, but decoding returns one space, so
+\texttt{decode(encode(s))} $\neq$ \texttt{s}.
+
+\subsection*{3) Not Preserving Concatenation}
+Tokenization of concatenated text may differ from concatenating tokenizations of parts.
+\begin{itemize}[leftmargin=1.2em]
+\item \texttt{a = "un"}, \texttt{b = "affable"}
+\item \texttt{encode(a+b)} for \texttt{"unaffable"}: \texttt{[8362, 9823, 8057, 2165]}
+\item \texttt{encode(a) + encode(b)}: \texttt{[8362, 170, 3101, 1895]}
+\end{itemize}
+Because subword segmentation depends on surrounding context, these sequences are different.
+
+\section*{Q2(c): Why Non-trivial Concatenation-Preserving Tokenizers Are Generally Impossible}
+Natural language tokenizers are designed to exploit context and compress frequent multi-character patterns into subwords (for example, WordPiece/BPE merges). If a tokenizer were both non-trivial and strictly concatenation-preserving for all strings, token boundaries could not depend on neighboring characters across concatenation boundaries, which prevents many useful merges and effectively collapses behavior toward character-level tokenization.
+
+\section*{AI Usage Disclosure}
+I used AI coding assistance to help draft and refine wording for written explanations and to automate LaTeX report generation from my implemented tests.
+
+\end{document}

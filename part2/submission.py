@@ -23,17 +23,9 @@ def your_prompt():
         A string.
     Example: a=1111, b=2222, prefix='Input: ', suffix='\nOutput: '
     """
-    prefix = (
-        "Question: what is 1234567+1234567?\n"
-        "Answer: 2469134\n"
-        "Question: what is 7654321+1111111?\n"
-        "Answer: 8765432\n"
-        "Question: what is 1000000+9000000?\n"
-        "Answer: 10000000\n"
-        "Question: what is "
-    )
+    prefix = "Add the two integers. Return only the final sum as digits.\nQ: "
 
-    suffix = '?\nAnswer: '
+    suffix = "\nA:"
 
     return prefix, suffix
 
@@ -49,8 +41,8 @@ def your_config():
     """
     config = {
         'max_tokens': 50, # max_tokens must be >= 50 because we don't always have prior on output length 
-        'temperature': 0.1,
-        'top_k': 0,
+        'temperature': 1.0,
+        'top_k': 50,
         'top_p': 1.0,
         'repetition_penalty': 1.0,
         'stop': []}
@@ -71,13 +63,10 @@ def your_post_processing(output_string):
         by extracting the two given numbers and adding them.
         the autograder will check whether the post processing function contains arithmetic additiona and the graders might also manually check.
     """
-    # Prefer extracting from the final answer segment to avoid picking numbers from echoed prompts.
-    answer_segment = output_string.split("Answer:")[-1]
-    fallback_segment = answer_segment if answer_segment else output_string
-    numbers = re.findall(r"\d+", fallback_segment)
-    if not numbers:
-        numbers = re.findall(r"\d+", output_string)
-    only_digits = numbers[-1] if numbers else ""
+    # Parse the first integer produced by the model continuation.
+    cleaned = output_string.strip().replace(",", "")
+    match = re.search(r"[-+]?\d+", cleaned)
+    only_digits = match.group(0) if match else ""
     try:
         res = int(only_digits)
     except:

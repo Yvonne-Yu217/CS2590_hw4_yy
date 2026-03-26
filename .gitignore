@@ -6,3 +6,6 @@ __pycache__/
 *.safetensors
 *.bin
 *.model
+
+.DS_Store
+part2/results/

@@ -23,13 +23,18 @@ def your_prompt():
         A string.
     Example: a=1111, b=2222, prefix='Input: ', suffix='\nOutput: '
     """
-    # Use spaced digit addition to reduce tokenizer misalignment, include clear instruction.
+    # Provide diverse carry/no-carry examples while keeping outputs numeric.
     prefix = (
-        "Return only the final sum as digits (space-separated input, no extra words).\n"
-        "Q: 9 9 9 9 9 9 9 + 1 0 1 0 1 0 1\n"
-        "A: 1 1 0 1 0 1 0 0\n"
-        "Q: 5 8 9 2 6 2 5 + 9 4 1 5 6 5 1\n"
-        "A: 1 5 3 0 8 2 7 6\n"
+        "Calculate the sum precisely. Align digits and add from right to left.\n\n"
+        "Q: 1 2 3 4 5 6 7 + 1 2 3 4 5 6 7\n"
+        "A: 2 4 6 9 1 3 4\n"
+        "Answer: 2469134\n\n"
+        "Q: 9 8 7 6 5 4 3 + 1 2 3 4 5 6 7\n"
+        "A: 1 1 1 1 1 1 1 0\n"
+        "Answer: 11111110\n\n"
+        "Q: 5 0 5 0 5 0 5 + 4 0 4 0 4 0 4\n"
+        "A: 9 0 9 0 9 0 9\n"
+        "Answer: 9090909\n\n"
         "Q:"
     )
     suffix = "\nA:"
@@ -51,7 +56,7 @@ def your_config():
         'temperature': 0.1,
         'top_k': 1,
         'top_p': 1.0,
-        'repetition_penalty': 1.0,
+        'repetition_penalty': 1.1,
         'stop': []}
     
     return config
@@ -80,76 +85,30 @@ def your_post_processing(output_string):
         by extracting the two given numbers and adding them.
         the autograder will check whether the post processing function contains arithmetic additiona and the graders might also manually check.
     """
-    cleaned = output_string.replace(" ", "").replace(",", "").strip()
-    lines = cleaned.splitlines()
-
-    if not lines:
+    # Remove all whitespace/newlines first so split formatting cannot break numbers.
+    cleaned = re.sub(r"\s+", "", output_string).replace(",", "").strip()
+    if not cleaned:
         return 0
 
-    first_line = lines[0]
-    first_line_is_question = first_line.strip().startswith("Q:")
-
-    # Tier 1: If first line is a bare integer, trust it.
-    m_bare = re.fullmatch(r"\s*([-+]?\d+)\s*", first_line)
-    if m_bare and not first_line_is_question:
-        try:
-            return int(m_bare.group(1))
-        except:
-            pass
-
-    # Tier 2: Prefer explicit labels on first line.
-    m_labeled = re.search(r"(?:A|Answer)\s*[:=]\s*([-+]?\d+)", first_line, flags=re.IGNORECASE)
-    if m_labeled:
-        try:
-            return int(m_labeled.group(1))
-        except:
-            pass
-
-    # Tier 3: If equation appears, prefer RHS number.
-    if "=" in first_line and not first_line_is_question:
-        rhs = first_line.split("=")[-1]
-        m_rhs = re.search(r"[-+]?\d+", rhs)
-        if m_rhs:
-            try:
-                return int(m_rhs.group(0))
-            except:
-                pass
-
-    # Tier 4: Fallback to last integer on first line.
-    first_line_nums = re.findall(r"[-+]?\d+", first_line)
-    if first_line_nums and not first_line_is_question:
-        try:
-            return int(first_line_nums[-1])
-        except:
-            pass
-
-    # Tier 5: Prefer explicit labels anywhere in output.
-    labeled_anywhere = re.findall(r"(?:A|Answer)\s*[:=]\s*([-+]?\d+)", cleaned, flags=re.IGNORECASE)
+    # Prefer explicit trailing labels near the answer region.
+    labeled_anywhere = re.findall(r"(?:A|Answer)[:=]([-+]?\d+)", cleaned, flags=re.IGNORECASE)
     if labeled_anywhere:
         try:
             return int(labeled_anywhere[-1])
         except:
             pass
 
-    # Tier 6: Filter obvious prompt-echo numbers, then choose likely final-length candidate.
-    all_any = re.findall(r"[-+]?\d+", cleaned)
+    # Prefer 7-8 digit candidates (expected range for 7-digit addition results).
+    long_nums = re.findall(r"\d{7,8}", cleaned)
+    if long_nums:
+        try:
+            return int(long_nums[-1])
+        except:
+            pass
+
+    # Final fallback: any numeric token.
+    all_any = re.findall(r"\d+", cleaned)
     if all_any:
-        banned = {
-            "9999999", "1010101", "5892625", "9415651", "11010100", "15308276",
-            "1234567", "2469134", "2020202"
-        }
-        filtered = [v for v in all_any if v not in banned]
-        length_pref = [v for v in filtered if len(v) in (7, 8)]
-        if length_pref:
-            try:
-                return int(length_pref[-1])
-            except:
-                pass
-        if filtered:
-            try:
-                return int(filtered[-1])
-            except:
-                pass
         try:
             return int(all_any[-1])
         except:

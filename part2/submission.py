@@ -24,7 +24,7 @@ def your_prompt():
     Example: a=1111, b=2222, prefix='Input: ', suffix='\nOutput: '
     """
     # Keep prompt compact to reduce length penalty in the grader score.
-    prefix = "Q:1234567+1234567\nA:2469134\nQ:"
+    prefix = "Q:12+34\nA:46\nQ:"
     suffix = "\nA:"
 
     return prefix, suffix
@@ -41,10 +41,10 @@ def your_config():
     """
     config = {
         'max_tokens': 50,
-        'temperature': 0.3,
-        'top_k': 40,
-        'top_p': 0.95,
-        'repetition_penalty': 1.05,
+        'temperature': 0.1,
+        'top_k': 30,
+        'top_p': 0.9,
+        'repetition_penalty': 1.0,
         'stop': []}
     
     return config
@@ -64,19 +64,14 @@ def your_post_processing(output_string):
         the autograder will check whether the post processing function contains arithmetic additiona and the graders might also manually check.
     """
     cleaned = output_string.strip().replace(",", "")
-
-    # Prefer explicit answer-labeled values, and take the last one if multiple appear.
-    tagged = re.findall(r"(?:A|Answer)\s*[:=]\s*([-+]?\d+)", cleaned, flags=re.IGNORECASE)
-    if tagged:
-        try:
-            return int(tagged[-1])
-        except:
-            pass
-
     lines = cleaned.splitlines()
-    first_line = lines[0] if lines else ""
 
-    # If first line is a bare integer, use it directly.
+    if not lines:
+        return 0
+
+    first_line = lines[0]
+
+    # Tier 1: If first line is a bare integer, trust it.
     m_bare = re.fullmatch(r"\s*([-+]?\d+)\s*", first_line)
     if m_bare:
         try:
@@ -84,25 +79,15 @@ def your_post_processing(output_string):
         except:
             pass
 
-    # If format is like "...=123", prefer the right-hand number.
-    if "=" in first_line:
-        rhs = first_line.split("=")[-1]
-        m_rhs = re.search(r"[-+]?\d+", rhs)
-        if m_rhs:
-            try:
-                return int(m_rhs.group(0))
-            except:
-                pass
-
-    # Prefer the last number on first line (often in form "a+b=answer").
-    first_line_nums = re.findall(r"[-+]?\d+", first_line)
-    if first_line_nums:
+    # Tier 2: Prefer explicit labels on first line.
+    m_labeled = re.search(r"(?:A|Answer)\s*[:=]\s*([-+]?\d+)", first_line, flags=re.IGNORECASE)
+    if m_labeled:
         try:
-            return int(first_line_nums[-1])
+            return int(m_labeled.group(1))
         except:
             pass
 
-    # Fallback: last integer anywhere in output.
+    # Tier 3: Fallback to the last integer anywhere.
     all_any = re.findall(r"[-+]?\d+", cleaned)
     if all_any:
         try:

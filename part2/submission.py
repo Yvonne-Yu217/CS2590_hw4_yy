@@ -46,7 +46,7 @@ def your_config():
     """
     config = {
         'max_tokens': 50,
-        'temperature': 0.0,
+        'temperature': 0.1,
         'top_k': 1,
         'top_p': 1.0,
         'repetition_penalty': 1.0,

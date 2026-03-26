@@ -8,7 +8,7 @@ import re
 import os
 
 def your_netid():
-    YOUR_NET_ID = 'N16833099'
+    YOUR_NET_ID = 'yy5919'
     return YOUR_NET_ID
 
 def your_hf_token():
@@ -23,8 +23,12 @@ def your_prompt():
         A string.
     Example: a=1111, b=2222, prefix='Input: ', suffix='\nOutput: '
     """
-    # Keep prompt compact to reduce length penalty in the grader score.
-    prefix = "Q:12+34\nA:46\nQ:"
+    # Use in-distribution 7-digit demonstrations for better arithmetic behavior.
+    prefix = (
+        "Q:1234567+1234567\nA:2469134\n"
+        "Q:1010101+1010101\nA:2020202\n"
+        "Q:"
+    )
     suffix = "\nA:"
 
     return prefix, suffix
@@ -87,11 +91,27 @@ def your_post_processing(output_string):
         except:
             pass
 
-    # Tier 3: Fallback to the last integer anywhere.
+    # Tier 3: Fallback to first integer on first line.
+    first_line_nums = re.findall(r"[-+]?\d+", first_line)
+    if first_line_nums:
+        try:
+            return int(first_line_nums[0])
+        except:
+            pass
+
+    # Tier 4: Prefer explicit labels anywhere in output.
+    labeled_anywhere = re.findall(r"(?:A|Answer)\s*[:=]\s*([-+]?\d+)", cleaned, flags=re.IGNORECASE)
+    if labeled_anywhere:
+        try:
+            return int(labeled_anywhere[0])
+        except:
+            pass
+
+    # Tier 5: Conservative fallback to first integer anywhere.
     all_any = re.findall(r"[-+]?\d+", cleaned)
     if all_any:
         try:
-            return int(all_any[-1])
+            return int(all_any[0])
         except:
             pass
 

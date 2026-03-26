@@ -23,14 +23,8 @@ def your_prompt():
         A string.
     Example: a=1111, b=2222, prefix='Input: ', suffix='\nOutput: '
     """
-    # Keep QA format but add carry-heavy anchors for 7-digit addition stability.
-    prefix = (
-        "Question: what is 3044419+6608684?\n"
-        "Answer: 9653103\n"
-        "Question: what is 1756139+8493797?\n"
-        "Answer: 10249936\n"
-        "Question: what is "
-    )
+    # Use a single carry-heavy 7-digit exemplar to guide long-addition behavior.
+    prefix = "Question: what is 3044419+6608684?\nAnswer: 9653103\nQuestion: what is "
     suffix = "?\nAnswer:"
 
     return prefix, suffix
@@ -47,9 +41,9 @@ def your_config():
     """
     config = {
         'max_tokens': 50,
-        'temperature': 0.1,
-        'top_k': 40,
-        'top_p': 0.95,
+        'temperature': 1.0,
+        'top_k': 50,
+        'top_p': 1.0,
         'repetition_penalty': 1.0,
         'stop': []}
     
@@ -74,7 +68,7 @@ def your_post_processing(output_string):
     # First line usually contains the answer in this QA format.
     first_line = cleaned.splitlines()[0] if cleaned else ""
 
-    # Prefer explicit "answer" marker if present.
+    # If model outputs an explicit answer label, prefer that number.
     m_answer = re.search(r"answer\s*[:=]?\s*([-+]?\d+)", cleaned, flags=re.IGNORECASE)
     if m_answer:
         try:
@@ -82,29 +76,26 @@ def your_post_processing(output_string):
         except:
             pass
 
-    # If model emits "...=123", prefer number on the right-hand side.
-    if "=" in first_line:
-        rhs = first_line.split("=")[-1]
-        m_rhs = re.search(r"[-+]?\d+", rhs)
-        if m_rhs:
-            try:
-                return int(m_rhs.group(0))
-            except:
-                pass
-
-    # Prefer first integer in the first line (e.g., "10249936" or "The answer is 10249936").
-    m_first = re.search(r"[-+]?\d+", first_line)
-    if m_first:
+    nums_first_line = re.findall(r"[-+]?\d+", first_line)
+    if nums_first_line:
         try:
-            return int(m_first.group(0))
+            nums = [int(x) for x in nums_first_line]
+            # For patterns like "a+b=answer", take the last number.
+            if "+" in first_line and len(nums) >= 3:
+                return nums[-1]
+            # If addends are echoed with answer, answer is typically the largest.
+            if len(nums) >= 2:
+                return max(nums)
+            return nums[0]
         except:
             pass
 
-    # Fallback to last integer anywhere in output.
+    # Fallback: if multiple numbers appear, prefer the largest candidate.
     all_any = re.findall(r"[-+]?\d+", cleaned)
     if all_any:
         try:
-            return int(all_any[-1])
+            all_nums = [int(x) for x in all_any]
+            return max(all_nums)
         except:
             pass
 

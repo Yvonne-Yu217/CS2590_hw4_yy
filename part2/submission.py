@@ -23,15 +23,11 @@ def your_prompt():
         A string.
     Example: a=1111, b=2222, prefix='Input: ', suffix='\nOutput: '
     """
-    # Randomized examples reduce copying one fixed target answer.
+    # 彻底删掉所有带空格的指令，回归最原始的 Q&A 模式
     prefix = (
-        "Instructions: Add the digits carefully. Use spaces between digits in your output.\n\n"
-        "Q: 1 3 5 7 9 2 4 + 2 4 6 8 1 3 5\n"
-        "A: 3 8 2 6 0 5 9\n\n"
-        "Q: 4 0 1 0 5 0 2 + 1 9 2 8 3 7 4\n"
-        "A: 5 9 3 8 8 7 6\n\n"
-        "Q: 8 1 7 2 6 3 5 + 1 0 2 9 3 8 4\n"
-        "A: 9 2 0 2 0 1 9\n\n"
+        "Q: 1111111 + 2222222\nA: 3333333\n\n"
+        "Q: 7654321 + 1234567\nA: 8888888\n\n"
+        "Q: 9876543 + 1234567\nA: 11111110\n\n"
         "Q: "
     )
     suffix = "\nA:"
@@ -49,28 +45,19 @@ def your_config():
         Adding additional keys will result in error.
     """
     config = {
-        'max_tokens': 50,
+        'max_tokens': 20,
         'temperature': 0.1,
         'top_k': 1,
         'top_p': 1.0,
-        'repetition_penalty': 1.1,
+        'repetition_penalty': 1.2,
         'stop': ["\n", "Q:"]}
     
     return config
 
 
 def your_pre_processing(s):
-    # Convert "1234567+7654321" into spaced form so tokenizer sees per-digit units.
-    cleaned = s.strip().replace(" ", "")
-    spaced = []
-    for ch in cleaned:
-        if ch.isdigit() or ch in "+-":
-            spaced.append(ch)
-        else:
-            spaced.append(ch)
-    # Add spaces between digits but keep + and - as separators.
-    spaced = " ".join(spaced).replace(" + ", " + ").replace(" - ", " - ")
-    return spaced
+    # 简单粗暴，不做任何干扰
+    return s.strip()
 
 
 def your_post_processing(output_string):
@@ -82,25 +69,17 @@ def your_post_processing(output_string):
         by extracting the two given numbers and adding them.
         the autograder will check whether the post processing function contains arithmetic additiona and the graders might also manually check.
     """
-    # Remove all whitespace/newlines first so multi-line digits become one number string.
+    # 1. 删掉所有空格和逗号，防止模型输出 1,234,567 或 1 2 3...
     cleaned = re.sub(r"\s+", "", output_string).replace(",", "").strip()
-    if not cleaned:
-        return 0
 
-    # Prefer the first plausible long sum token.
+    # 2. 在清理后的字符串里，找第一个出现的 7 到 9 位数字（加法结果的合理长度）
     m_long = re.search(r"(\d{7,9})", cleaned)
     if m_long:
-        try:
-            return int(m_long.group(1))
-        except:
-            pass
+        return int(m_long.group(1))
 
-    # Final fallback: first number in cleaned output.
+    # 3. 如果没找到长数字，就抓第一个看到的数字序列
     m_any = re.search(r"\d+", cleaned)
     if m_any:
-        try:
-            return int(m_any.group(0))
-        except:
-            pass
+        return int(m_any.group(0))
 
     return 0

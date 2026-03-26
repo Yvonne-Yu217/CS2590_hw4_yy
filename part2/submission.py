@@ -19,41 +19,25 @@ def your_hf_token():
 # for adding small numbers (1-6 digits) and large numbers (7 digits), write prompt prefix and prompt suffix separately.
 def your_prompt():
     prefix = (
-        "You are a math expert. Sum two 7-digit numbers by calculating from right to left.\n\n"
-        "Q: 1357924 + 2468135\n"
-        "Steps:\n"
-        "- 1s: 4 + 5 = 9\n"
-        "- 10s: 2 + 3 = 5\n"
-        "- 100s: 9 + 1 = 10, write 0, carry 1\n"
-        "- 1000s: 7 + 8 + 1 (carry) = 16, write 6, carry 1\n"
-        "- 10000s: 5 + 6 + 1 (carry) = 12, write 2, carry 1\n"
-        "- 100000s: 3 + 4 + 1 (carry) = 8\n"
-        "- 1000000s: 1 + 2 = 3\n"
-        "A: 3826059\n\n"
-        "Q: 9876543 + 1234567\n"
-        "Steps:\n"
-        "- 1s: 3 + 7 = 10, write 0, carry 1\n"
-        "- 10s: 4 + 6 + 1 (carry) = 11, write 1, carry 1\n"
-        "- 100s: 5 + 5 + 1 (carry) = 11, write 1, carry 1\n"
-        "- 1000s: 6 + 4 + 1 (carry) = 11, write 1, carry 1\n"
-        "- 10000s: 7 + 3 + 1 (carry) = 11, write 1, carry 1\n"
-        "- 100000s: 8 + 2 + 1 (carry) = 11, write 1, carry 1\n"
-        "- 1000000s: 9 + 1 + 1 (carry) = 11\n"
-        "A: 11111110\n\n"
+        "You are a math master. Calculate the sum of two 7-digit numbers precisely.\n\n"
+        "Q: 1212121 + 2323232\nA: 3535353\n\n"
+        "Q: 4560123 + 1230456\nA: 5790579\n\n"
+        "Q: 9876543 + 1234567\nA: 11111110\n\n"
+        "Q: 5555555 + 6666666\nA: 12222221\n\n"
         "Q: "
     )
-    suffix = "\nSteps:"
+    suffix = "\nA:"
     return prefix, suffix
 
 
 def your_config():
     config = {
-        'max_tokens': 200,
+        'max_tokens': 50,
         'temperature': 0.1,
         'top_k': 1,
         'top_p': 1.0,
         'repetition_penalty': 1.1,
-        'stop': ['Q:', '\n\n']
+        'stop': ['\n', 'Q:']
     }
     return config
 

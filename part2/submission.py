@@ -19,11 +19,16 @@ def your_hf_token():
 # for adding small numbers (1-6 digits) and large numbers (7 digits), write prompt prefix and prompt suffix separately.
 def your_prompt():
     prefix = (
-        "You are a math master. Calculate the sum of two 7-digit numbers precisely.\n\n"
-        "Q: 1212121 + 2323232\nA: 3535353\n\n"
-        "Q: 4560123 + 1230456\nA: 5790579\n\n"
-        "Q: 9876543 + 1234567\nA: 11111110\n\n"
-        "Q: 5555555 + 6666666\nA: 12222221\n\n"
+        "You are a mathematical assistant that performs addition by column.\n"
+        "Break the numbers into digits and add them from right to left.\n\n"
+        "Q: 1 2 1 2 1 2 1 + 2 3 2 3 2 3 2\n"
+        "A: (Step-by-step work) Final Answer: 3535353\n\n"
+        "Q: 4 5 6 0 1 2 3 + 1 2 3 0 4 5 6\n"
+        "A: (Step-by-step work) Final Answer: 5790579\n\n"
+        "Q: 9 8 7 6 5 4 3 + 1 2 3 4 5 6 7\n"
+        "A: (Step-by-step work) Final Answer: 11111110\n\n"
+        "Q: 5 5 5 5 5 5 5 + 6 6 6 6 6 6 6\n"
+        "A: (Step-by-step work) Final Answer: 12222221\n\n"
         "Q: "
     )
     suffix = "\nA:"

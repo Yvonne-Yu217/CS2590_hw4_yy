@@ -23,9 +23,14 @@ def your_prompt():
         A string.
     Example: a=1111, b=2222, prefix='Input: ', suffix='\nOutput: '
     """
-    # Keep the prompt short (grading rewards brevity) and direct.
-    prefix = "Compute exact sum: "
-    suffix = " ="
+    # Use Llama-2-chat native instruction format for better adherence.
+    prefix = (
+        "<s>[INST] You are a reliable arithmetic assistant. "
+        "Add the two integers exactly and return only the final sum as digits. "
+        "Example: 123+456 -> 579. "
+        "Now solve: "
+    )
+    suffix = " [/INST]"
 
     return prefix, suffix
 
@@ -65,7 +70,7 @@ def your_post_processing(output_string):
     """
     cleaned = output_string.strip().replace(",", "")
 
-    # Prefer the first generated line to avoid later drift/hallucinated continuations.
+    # Prefer the first generated line, but keep fallback on full text.
     first_line = cleaned.splitlines()[0] if cleaned else ""
 
     # If model emits "... = 123", prefer the number after '='.
@@ -78,19 +83,19 @@ def your_post_processing(output_string):
             except:
                 pass
 
-    # Fallback: first number from first line.
-    m_first = re.search(r"[-+]?\d+", first_line)
-    if m_first:
+    # Many model outputs contain "a+b=answer"; last number is usually the answer.
+    all_first_line = re.findall(r"[-+]?\d+", first_line)
+    if all_first_line:
         try:
-            return int(m_first.group(0))
+            return int(all_first_line[-1])
         except:
             pass
 
-    # Last fallback: first number anywhere in output.
-    m_any = re.search(r"[-+]?\d+", cleaned)
-    if m_any:
+    # Last fallback: last number anywhere in output.
+    all_any = re.findall(r"[-+]?\d+", cleaned)
+    if all_any:
         try:
-            return int(m_any.group(0))
+            return int(all_any[-1])
         except:
             pass
 

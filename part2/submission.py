@@ -22,13 +22,13 @@ def your_prompt():
         "You are a maths master. Calculate the sum of two 7-digit numbers precisely using digit-by-digit addition with carry.\n\n"
         "Q: 1 2 3 0 4 5 6 + 1 2 3 0 4 5 6\n"
         "A:\n"
-        "Step 1: 6 + 6 = 12. Write 2, carry 1.\n"
-        "Step 2: 5 + 5 + 1 (carry) = 11. Write 1, carry 1.\n"
-        "Step 3: 4 + 4 + 1 (carry) = 9. Write 9, carry 0.\n"
-        "Step 4: 0 + 0 + 0 (carry) = 0. Write 0, carry 0.\n"
-        "Step 5: 3 + 3 + 0 (carry) = 6. Write 6, carry 0.\n"
-        "Step 6: 2 + 2 + 0 (carry) = 4. Write 4, carry 0.\n"
-        "Step 7: 1 + 1 + 0 (carry) = 2. Write 2, carry 0.\n"
+        "Step 1 (ones): 6 + 6 = 12. Write 2, carry 1.\n"
+        "Step 2 (tens): 5 + 5 + 1 (carry) = 11. Write 1, carry 1.\n"
+        "Step 3 (hundreds): 4 + 4 + 1 (carry) = 9. Write 9, carry 0.\n"
+        "Step 4 (thousands): 0 + 0 + 0 (carry) = 0. Write 0, carry 0.\n"
+        "Step 5 (ten thousands): 3 + 3 + 0 (carry) = 6. Write 6, carry 0.\n"
+        "Step 6 (hundred thousands): 2 + 2 + 0 (carry) = 4. Write 4, carry 0.\n"
+        "Step 7 (millions): 1 + 1 + 0 (carry) = 2. Write 2, carry 0.\n"
         "Final Answer: 2460912\n"
         "###\n\n"
         "Q: 9 9 9 9 9 9 9 + 1 0 0 0 0 0 1\n"
@@ -68,7 +68,7 @@ def your_pre_processing(s):
             processed_parts.append(" ".join(list(part)))
         else:
             processed_parts.append(part)
-    return " ".join(processed_parts)
+    return " ".join(processed_parts).strip()
 
 
 def your_post_processing(output_string):

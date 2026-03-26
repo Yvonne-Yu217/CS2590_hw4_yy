@@ -49,10 +49,10 @@ def your_config():
     """
     config = {
         'max_tokens': 50, # max_tokens must be >= 50 because we don't always have prior on output length 
-        'temperature': 0.2,
-        'top_k': 20,
-        'top_p': 0.9,
-        'repetition_penalty': 1,
+        'temperature': 0.0,
+        'top_k': 0,
+        'top_p': 1.0,
+        'repetition_penalty': 1.0,
         'stop': []}
     
     return config
@@ -71,13 +71,13 @@ def your_post_processing(output_string):
         by extracting the two given numbers and adding them.
         the autograder will check whether the post processing function contains arithmetic additiona and the graders might also manually check.
     """
-    # Prefer 7-8 digit candidates for this task, then fall back to any integer.
-    prioritized = re.findall(r"\b\d{7,8}\b", output_string)
-    if prioritized:
-        only_digits = prioritized[0]
-    else:
-        fallback = re.findall(r"\d+", output_string)
-        only_digits = fallback[0] if fallback else ""
+    # Prefer extracting from the final answer segment to avoid picking numbers from echoed prompts.
+    answer_segment = output_string.split("Answer:")[-1]
+    fallback_segment = answer_segment if answer_segment else output_string
+    numbers = re.findall(r"\d+", fallback_segment)
+    if not numbers:
+        numbers = re.findall(r"\d+", output_string)
+    only_digits = numbers[-1] if numbers else ""
     try:
         res = int(only_digits)
     except:

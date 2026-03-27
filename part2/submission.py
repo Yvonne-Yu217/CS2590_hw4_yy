@@ -24,16 +24,18 @@ def your_prompt():
     Example: a=1111, b=2222, prefix='Input: ', suffix='\nOutput: '
     """
     prefix = (
-        "Sample Question 1: What is 1034169 + 4154323?\n"
+        "Sample Question 1: What is 1034169+4154323?\n"
         "Answer: 5188482\n"
-        "Sample Question 2: What is 1357924 + 2468135?\n"
+        "Sample Question 2: What is 1357924+2468135?\n"
         "Answer: 3826059\n"
-        "Sample Question 3: What is 1234567 + 1234567?\n"
+        "Sample Question 3: What is 1234567+1234567?\n"
         "Answer: 2469134\n"
-        "Sample Question 4: What is 9875543 + 1093285?\n"
+        "Sample Question 4: What is 9875543+1093285?\n"
         "Answer: 10968828\n"
-        "Sample Question 5: What is 4398254 + 2309481?\n"
+        "Sample Question 5: What is 4398254+2309481?\n"
         "Answer: 4629102\n"
+        # "Sample Question 6: What is 6143768 + 3896825?\n"
+        # "Answer: 10040593\n"
         "Question: What is "
     )
     suffix = "? Answer:"

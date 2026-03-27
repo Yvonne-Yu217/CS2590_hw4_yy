@@ -29,19 +29,17 @@ def your_prompt():
         "Step 5 (ten thousands): 3 + 3 + 0 (carry) = 6. Write 6, carry 0.\n"
         "Step 6 (hundred thousands): 2 + 2 + 0 (carry) = 4. Write 4, carry 0.\n"
         "Step 7 (millions): 1 + 1 + 0 (carry) = 2. Write 2, carry 0.\n"
-        "Final Answer: 2460912\n"
-        "###\n\n"
+        "Final Answer: 2460912\n\n"
         "Q: 9 9 9 9 9 9 9 + 1 0 0 0 0 0 1\n"
         "A:\n"
-        "Step 1: 9 + 1 = 10. Write 0, carry 1.\n"
-        "Step 2: 9 + 0 + 1 (carry) = 10. Write 0, carry 1.\n"
-        "Step 3: 9 + 0 + 1 (carry) = 10. Write 0, carry 1.\n"
-        "Step 4: 9 + 0 + 1 (carry) = 10. Write 0, carry 1.\n"
-        "Step 5: 9 + 0 + 1 (carry) = 10. Write 0, carry 1.\n"
-        "Step 6: 9 + 0 + 1 (carry) = 10. Write 0, carry 1.\n"
-        "Step 7: 9 + 1 + 1 (carry) = 11. Write 11.\n"
-        "Final Answer: 11000000\n"
-        "###\n\n"
+        "1s: 9 + 1 = 10, write 0, carry 1\n"
+        "10s: 9 + 0 + 1 = 10, write 0, carry 1\n"
+        "100s: 9 + 0 + 1 = 10, write 0, carry 1\n"
+        "1000s: 9 + 0 + 1 = 10, write 0, carry 1\n"
+        "10000s: 9 + 0 + 1 = 10, write 0, carry 1\n"
+        "100000s: 9 + 0 + 1 = 10, write 0, carry 1\n"
+        "1000000s: 9 + 1 + 1 = 11, write 11\n"
+        "Final Answer: 11000000\n\n"
         "Q: "
     )
     suffix = "\nA:"
@@ -51,12 +49,10 @@ def your_prompt():
 def your_config():
     return {
         'max_tokens': 350,
-        'temperature': 0.0,
-        'do_sample': False,
+        'temperature': 0.1,
         'top_k': 1,
         'top_p': 1.0,
-        'repetition_penalty': 1.0,
-        'stop': ['Q:', '###']
+        'repetition_penalty': 1.0
     }
 
 
@@ -73,21 +69,23 @@ def your_pre_processing(s):
 
 
 def your_post_processing(output_string):
-
+    # 从最后一个 Final Answer 开始提取
     if "Final Answer:" in output_string:
         output_string = output_string.split("Final Answer:")[-1]
 
+    # 移除多余空白
     cleaned = re.sub(r"\s+", "", output_string).replace(",", "").strip()
-
     if not cleaned:
         return 0
 
-    m_long = re.search(r"(\d{7,9})", cleaned)
-    if m_long:
-        return int(m_long.group(1))
-
     nums = re.findall(r"\d+", cleaned)
-    if nums:
-        full_num = ''.join(nums)
-        return int(full_num)
-    return 0
+    if not nums:
+        return 0
+
+    # 优先从末尾找到 7-8 位的结果
+    for n in reversed(nums):
+        if 7 <= len(n) <= 8:
+            return int(n)
+
+    # 否则直接以最后一个数字块为答案
+    return int(nums[-1])

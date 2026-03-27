@@ -23,7 +23,6 @@ def your_prompt():
         A string.
     Example: a=1111, b=2222, prefix='Input: ', suffix='\nOutput: '
     """
-    # Use prompt structure from the prompt-a-thon example with multiple sample questions.
     prefix = (
         "Sample Question 1: What is 1034169 + 4154323?\n"
         "Answer: 5188482\n"
@@ -37,6 +36,8 @@ def your_prompt():
         "Answer: 4629102\n"
         "Question: What is a+b?\n"
     )
+    suffix = ""
+    return prefix, suffix
     suffix = "\nA:"
 
     return prefix, suffix

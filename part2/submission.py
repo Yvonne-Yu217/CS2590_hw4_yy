@@ -18,46 +18,100 @@ def your_hf_token():
 
 # for adding small numbers (1-6 digits) and large numbers (7 digits), write prompt prefix and prompt suffix separately.
 def your_prompt():
+    """Returns a prompt to add to "[PREFIX]a+b[SUFFIX]", where a,b are integers
+    Returns:
+        A string.
+    Example: a=1111, b=2222, prefix='Input: ', suffix='\nOutput: '
+    """
+    # Use prompt structure from the prompt-a-thon example with multiple sample questions.
     prefix = (
-        "Q: 1425367 + 2351421\nA: 3776788\n\n"
-        "Q: 8594302 + 1205697\nA: 9799999\n\n"
-        "Q: 9876543 + 1234567\nA: 11111110\n\n"
-        "Q: 5050505 + 4949495\nA: 10000000\n\n"
-        "Q: "
+        "Sample Question 1: What is 1034169 + 4154323?\n"
+        "Answer: 5188482\n"
+        "Sample Question 2: What is 1357924 + 2468135?\n"
+        "Answer: 3826059\n"
+        "Sample Question 3: What is 1234567 + 1234567?\n"
+        "Answer: 2469134\n"
+        "Sample Question 4: What is 9875543 + 1093285?\n"
+        "Answer: 10968828\n"
+        "Sample Question 5: What is 4398254 + 2309481?\n"
+        "Answer: 4629102\n"
+        "Question: What is a+b?\n"
     )
     suffix = "\nA:"
+
     return prefix, suffix
 
 
 def your_config():
+    """Returns a config for prompting api
+    Returns:
+        For both short/medium, long: a dictionary with fixed string keys.
+    Note:
+        do not add additional keys. 
+        The autograder will check whether additional keys are present.
+        Adding additional keys will result in error.
+    """
     config = {
-        'max_tokens': 60,
+        'max_tokens': 50,
         'temperature': 0.1,
         'top_k': 1,
         'top_p': 1.0,
         'repetition_penalty': 1.1,
-        'stop': ['\n', 'Q:']
-    }
+        'stop': []}
+    
     return config
 
 
 def your_pre_processing(s):
-    # 简单粗暴，不做任何干扰
-    return s.strip()
+    # Convert "1234567+7654321" into spaced form so tokenizer sees per-digit units.
+    cleaned = s.strip().replace(" ", "")
+    spaced = []
+    for ch in cleaned:
+        if ch.isdigit() or ch in "+-":
+            spaced.append(ch)
+        else:
+            spaced.append(ch)
+    # Add spaces between digits but keep + and - as separators.
+    spaced = " ".join(spaced).replace(" + ", " + ").replace(" - ", " - ")
+    return spaced
 
 
 def your_post_processing(output_string):
-    # 1. 过滤掉所有非数字的“垃圾字符”（包括逗号、空格、换行）
-    cleaned = re.sub(r"[^0-9]", "", output_string).strip()
-
+    """Returns the post processing function to extract the answer for addition
+    Returns:
+        For: the function returns extracted result
+    Note:
+        do not attempt to "hack" the post processing function
+        by extracting the two given numbers and adding them.
+        the autograder will check whether the post processing function contains arithmetic additiona and the graders might also manually check.
+    """
+    # Remove all whitespace/newlines first so split formatting cannot break numbers.
+    cleaned = re.sub(r"\s+", "", output_string).replace(",", "").strip()
     if not cleaned:
         return 0
 
-    # 2. 优先找符合 7-8 位长度的数字
-    match = re.search(r"(\d{7,8})", cleaned)
-    if match:
-        return int(match.group(1))
+    # Prefer explicit trailing labels near the answer region.
+    labeled_anywhere = re.findall(r"(?:A|Answer)[:=]([-+]?\d+)", cleaned, flags=re.IGNORECASE)
+    if labeled_anywhere:
+        try:
+            return int(labeled_anywhere[-1])
+        except:
+            pass
 
-    # 3. 兜底：抓第一个数字块
-    all_nums = re.findall(r"\d+", cleaned)
-    return int(all_nums[0]) if all_nums else 0
+    # Prefer 7-8 digit candidates (expected range for 7-digit addition results).
+    long_nums = re.findall(r"\d{7,8}", cleaned)
+    if long_nums:
+        try:
+            return int(long_nums[-1])
+        except:
+            pass
+
+    # Final fallback: any numeric token.
+    all_any = re.findall(r"\d+", cleaned)
+    if all_any:
+        try:
+            return int(all_any[-1])
+        except:
+            pass
+
+    return 0

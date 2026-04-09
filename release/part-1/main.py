@@ -194,7 +194,17 @@ if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained("bert-base-cased")
 
     # Tokenize the dataset
-    dataset = load_dataset("imdb")
+    # Some datasets/fsspec combinations can fail strict split verification on IMDb.
+    # Fall back to non-strict verification so training can proceed reliably on shared HPC envs.
+    try:
+        dataset = load_dataset("imdb")
+    except Exception as e:
+        print(f"Default IMDb loading failed ({e}). Retrying with ignore_verifications=True...")
+        try:
+            dataset = load_dataset("imdb", ignore_verifications=True)
+        except TypeError:
+            # Newer datasets versions use verification_mode instead of ignore_verifications.
+            dataset = load_dataset("imdb", verification_mode="no_checks")
     tokenized_dataset = dataset.map(tokenize_function, batched=True)
 
     # Prepare dataset for use by model

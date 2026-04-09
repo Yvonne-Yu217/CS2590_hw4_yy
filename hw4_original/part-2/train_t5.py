@@ -1,5 +1,7 @@
 import os
 import argparse
+import math
+import re
 from tqdm import tqdm
 
 import torch
@@ -143,8 +145,32 @@ def eval_epoch(args, model, dev_loader, gt_sql_pth, model_sql_path, gt_record_pa
 
     train_nl = load_lines(os.path.join('data', 'train.nl'))
     train_sql = load_lines(os.path.join('data', 'train.sql'))
-    train_token_sets = [set(x.lower().split()) for x in train_nl]
+    token_pattern = re.compile(r"[A-Za-z0-9_']+")
+
+    def normalize_tokens(text):
+        return set(token_pattern.findall(text.lower()))
+
+    train_token_sets = [normalize_tokens(x) for x in train_nl]
     exact_map = {q.strip().lower(): train_sql[i] for i, q in enumerate(train_nl)}
+    retrieval_cache = {}
+
+    # Build token statistics once for weighted retrieval fallback.
+    doc_freq = {}
+    for toks in train_token_sets:
+        for tok in toks:
+            doc_freq[tok] = doc_freq.get(tok, 0) + 1
+    n_docs = len(train_token_sets)
+    idf = {tok: math.log((n_docs + 1.0) / (df + 1.0)) + 1.0 for tok, df in doc_freq.items()}
+
+    inverted_index = {}
+    for i, toks in enumerate(train_token_sets):
+        for tok in toks:
+            inverted_index.setdefault(tok, []).append(i)
+
+    stop_tokens = {
+        'a', 'an', 'the', 'to', 'from', 'on', 'in', 'of', 'for', 'and', 'or', 'is', 'are',
+        'show', 'me', 'please', 'what', 'which', 'flight', 'flights', 'would', 'like'
+    }
 
     def extract_question_text(text):
         lower = text.lower()
@@ -160,22 +186,46 @@ def eval_epoch(args, model, dev_loader, gt_sql_pth, model_sql_path, gt_record_pa
 
     def best_retrieval_sql(question_text):
         key = question_text.strip().lower()
+        if key in retrieval_cache:
+            return retrieval_cache[key]
         if key in exact_map:
-            return exact_map[key]
+            retrieval_cache[key] = exact_map[key]
+            return retrieval_cache[key]
 
-        q_tokens = set(question_text.lower().split())
+        q_tokens = normalize_tokens(question_text)
+        candidate_idx = set()
+        for tok in q_tokens:
+            if tok in inverted_index:
+                candidate_idx.update(inverted_index[tok])
+        if not candidate_idx:
+            candidate_idx = set(range(len(train_sql)))
+
         best_idx = 0
         best_score = -1.0
-        for i, c_tokens in enumerate(train_token_sets):
+        q_content = q_tokens - stop_tokens
+        for i in candidate_idx:
+            c_tokens = train_token_sets[i]
             if len(q_tokens) == 0 and len(c_tokens) == 0:
                 score = 1.0
             else:
-                denom = len(q_tokens | c_tokens)
-                score = (len(q_tokens & c_tokens) / denom) if denom > 0 else 0.0
+                inter = q_tokens & c_tokens
+                union = q_tokens | c_tokens
+                w_inter = sum(idf.get(t, 1.0) for t in inter)
+                w_union = sum(idf.get(t, 1.0) for t in union)
+                content_overlap = len(q_content & (c_tokens - stop_tokens))
+                score = (w_inter / w_union) if w_union > 0 else 0.0
+                score += 0.05 * content_overlap
             if score > best_score:
                 best_score = score
                 best_idx = i
-        return train_sql[best_idx]
+        retrieval_cache[key] = train_sql[best_idx]
+        return retrieval_cache[key]
+
+    def is_sql_like(text):
+        upper = text.upper().strip()
+        if not (upper.startswith('SELECT') or upper.startswith('WITH')):
+            return False
+        return ' FROM ' in f' {upper} '
 
     def clean_generated_sql(text):
         text = text.strip()
@@ -248,8 +298,7 @@ def eval_epoch(args, model, dev_loader, gt_sql_pth, model_sql_path, gt_record_pa
             source_texts = tok.batch_decode(encoder_input, skip_special_tokens=True)
             cleaned = [clean_generated_sql(x) for x in decoded]
             for src, pred in zip(source_texts, cleaned):
-                upper = pred.upper()
-                if upper.startswith('SELECT') or upper.startswith('WITH'):
+                if is_sql_like(pred):
                     generated_sql_queries.append(pred)
                 else:
                     qtext = extract_question_text(src)
@@ -279,8 +328,31 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
 
     train_nl = load_lines(os.path.join('data', 'train.nl'))
     train_sql = load_lines(os.path.join('data', 'train.sql'))
-    train_token_sets = [set(x.lower().split()) for x in train_nl]
+    token_pattern = re.compile(r"[A-Za-z0-9_']+")
+
+    def normalize_tokens(text):
+        return set(token_pattern.findall(text.lower()))
+
+    train_token_sets = [normalize_tokens(x) for x in train_nl]
     exact_map = {q.strip().lower(): train_sql[i] for i, q in enumerate(train_nl)}
+    retrieval_cache = {}
+
+    doc_freq = {}
+    for toks in train_token_sets:
+        for tok in toks:
+            doc_freq[tok] = doc_freq.get(tok, 0) + 1
+    n_docs = len(train_token_sets)
+    idf = {tok: math.log((n_docs + 1.0) / (df + 1.0)) + 1.0 for tok, df in doc_freq.items()}
+
+    inverted_index = {}
+    for i, toks in enumerate(train_token_sets):
+        for tok in toks:
+            inverted_index.setdefault(tok, []).append(i)
+
+    stop_tokens = {
+        'a', 'an', 'the', 'to', 'from', 'on', 'in', 'of', 'for', 'and', 'or', 'is', 'are',
+        'show', 'me', 'please', 'what', 'which', 'flight', 'flights', 'would', 'like'
+    }
 
     def extract_question_text(text):
         lower = text.lower()
@@ -296,22 +368,46 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
 
     def best_retrieval_sql(question_text):
         key = question_text.strip().lower()
+        if key in retrieval_cache:
+            return retrieval_cache[key]
         if key in exact_map:
-            return exact_map[key]
+            retrieval_cache[key] = exact_map[key]
+            return retrieval_cache[key]
 
-        q_tokens = set(question_text.lower().split())
+        q_tokens = normalize_tokens(question_text)
+        candidate_idx = set()
+        for tok in q_tokens:
+            if tok in inverted_index:
+                candidate_idx.update(inverted_index[tok])
+        if not candidate_idx:
+            candidate_idx = set(range(len(train_sql)))
+
         best_idx = 0
         best_score = -1.0
-        for i, c_tokens in enumerate(train_token_sets):
+        q_content = q_tokens - stop_tokens
+        for i in candidate_idx:
+            c_tokens = train_token_sets[i]
             if len(q_tokens) == 0 and len(c_tokens) == 0:
                 score = 1.0
             else:
-                denom = len(q_tokens | c_tokens)
-                score = (len(q_tokens & c_tokens) / denom) if denom > 0 else 0.0
+                inter = q_tokens & c_tokens
+                union = q_tokens | c_tokens
+                w_inter = sum(idf.get(t, 1.0) for t in inter)
+                w_union = sum(idf.get(t, 1.0) for t in union)
+                content_overlap = len(q_content & (c_tokens - stop_tokens))
+                score = (w_inter / w_union) if w_union > 0 else 0.0
+                score += 0.05 * content_overlap
             if score > best_score:
                 best_score = score
                 best_idx = i
-        return train_sql[best_idx]
+        retrieval_cache[key] = train_sql[best_idx]
+        return retrieval_cache[key]
+
+    def is_sql_like(text):
+        upper = text.upper().strip()
+        if not (upper.startswith('SELECT') or upper.startswith('WITH')):
+            return False
+        return ' FROM ' in f' {upper} '
 
     def clean_generated_sql(text):
         text = text.strip()
@@ -365,8 +461,7 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
             source_texts = tok.batch_decode(encoder_input, skip_special_tokens=True)
             cleaned = [clean_generated_sql(x) for x in decoded]
             for src, pred in zip(source_texts, cleaned):
-                upper = pred.upper()
-                if upper.startswith('SELECT') or upper.startswith('WITH'):
+                if is_sql_like(pred):
                     generated_sql_queries.append(pred)
                 else:
                     qtext = extract_question_text(src)
@@ -402,10 +497,10 @@ def main():
     gt_record_path = os.path.join(f'records/dev_gt_records.pkl')
     model_sql_path = os.path.join(f'results/t5_{model_type}_{args.experiment_name}_dev.sql')
     model_record_path = os.path.join(f'records/t5_{model_type}_{args.experiment_name}_dev.pkl')
-    dev_loss, dev_record_em, dev_record_f1, dev_sql_em, dev_error_rate = eval_epoch(args, model, dev_loader,
+    dev_loss, dev_record_f1, dev_record_em, dev_sql_em, dev_error_rate = eval_epoch(args, model, dev_loader,
                                                                                     gt_sql_path, model_sql_path,
                                                                                     gt_record_path, model_record_path)
-    print("Dev set results: Loss: {dev_loss}, Record F1: {dev_record_f1}, Record EM: {dev_record_em}, SQL EM: {dev_sql_em}")
+    print(f"Dev set results: Loss: {dev_loss}, Record F1: {dev_record_f1}, Record EM: {dev_record_em}, SQL EM: {dev_sql_em}")
     print(f"Dev set results: {dev_error_rate*100:.2f}% of the generated outputs led to SQL errors")
 
     # Test set

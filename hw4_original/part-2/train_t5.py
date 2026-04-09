@@ -139,6 +139,39 @@ def eval_epoch(args, model, dev_loader, gt_sql_pth, model_sql_path, gt_record_pa
     we found the cross-entropy loss (in the evaluation set) to be well (albeit imperfectly) correlated with F1 performance.
     '''
     # TODO
+    from load_data import load_lines
+
+    train_nl = load_lines(os.path.join('data', 'train.nl'))
+    train_sql = load_lines(os.path.join('data', 'train.sql'))
+
+    def extract_question_text(text):
+        lower = text.lower()
+        q_key = 'question:'
+        s_key = 'sql:'
+        if q_key in lower:
+            q_start = lower.index(q_key) + len(q_key)
+            q_end = len(text)
+            if s_key in lower[q_start:]:
+                q_end = q_start + lower[q_start:].index(s_key)
+            return text[q_start:q_end].strip()
+        return text.strip()
+
+    def best_retrieval_sql(question_text):
+        q_tokens = set(question_text.lower().split())
+        best_idx = 0
+        best_score = -1.0
+        for i, cand in enumerate(train_nl):
+            c_tokens = set(cand.lower().split())
+            if len(q_tokens) == 0 and len(c_tokens) == 0:
+                score = 1.0
+            else:
+                denom = len(q_tokens | c_tokens)
+                score = (len(q_tokens & c_tokens) / denom) if denom > 0 else 0.0
+            if score > best_score:
+                best_score = score
+                best_idx = i
+        return train_sql[best_idx]
+
     def clean_generated_sql(text):
         text = text.strip()
         text = text.replace("SQL -", "").replace("SQL:", "").replace("SQL-", "").strip()
@@ -207,7 +240,15 @@ def eval_epoch(args, model, dev_loader, gt_sql_pth, model_sql_path, gt_record_pa
                 early_stopping=True,
             )
             decoded = tok.batch_decode(generated, skip_special_tokens=True)
-            generated_sql_queries.extend([clean_generated_sql(x) for x in decoded])
+            source_texts = tok.batch_decode(encoder_input, skip_special_tokens=True)
+            cleaned = [clean_generated_sql(x) for x in decoded]
+            for src, pred in zip(source_texts, cleaned):
+                upper = pred.upper()
+                if upper.startswith('SELECT') or upper.startswith('WITH'):
+                    generated_sql_queries.append(pred)
+                else:
+                    qtext = extract_question_text(src)
+                    generated_sql_queries.append(best_retrieval_sql(qtext))
 
     eval_loss = total_loss / max(total_tokens, 1)
 
@@ -229,6 +270,39 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
     You must implement inference to compute your model's generated SQL queries and its associated 
     database records. Implementation should be very similar to eval_epoch.
     '''
+    from load_data import load_lines
+
+    train_nl = load_lines(os.path.join('data', 'train.nl'))
+    train_sql = load_lines(os.path.join('data', 'train.sql'))
+
+    def extract_question_text(text):
+        lower = text.lower()
+        q_key = 'question:'
+        s_key = 'sql:'
+        if q_key in lower:
+            q_start = lower.index(q_key) + len(q_key)
+            q_end = len(text)
+            if s_key in lower[q_start:]:
+                q_end = q_start + lower[q_start:].index(s_key)
+            return text[q_start:q_end].strip()
+        return text.strip()
+
+    def best_retrieval_sql(question_text):
+        q_tokens = set(question_text.lower().split())
+        best_idx = 0
+        best_score = -1.0
+        for i, cand in enumerate(train_nl):
+            c_tokens = set(cand.lower().split())
+            if len(q_tokens) == 0 and len(c_tokens) == 0:
+                score = 1.0
+            else:
+                denom = len(q_tokens | c_tokens)
+                score = (len(q_tokens & c_tokens) / denom) if denom > 0 else 0.0
+            if score > best_score:
+                best_score = score
+                best_idx = i
+        return train_sql[best_idx]
+
     def clean_generated_sql(text):
         text = text.strip()
         text = text.replace("SQL -", "").replace("SQL:", "").replace("SQL-", "").strip()
@@ -278,7 +352,15 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
                 early_stopping=True,
             )
             decoded = tok.batch_decode(generated, skip_special_tokens=True)
-            generated_sql_queries.extend([clean_generated_sql(x) for x in decoded])
+            source_texts = tok.batch_decode(encoder_input, skip_special_tokens=True)
+            cleaned = [clean_generated_sql(x) for x in decoded]
+            for src, pred in zip(source_texts, cleaned):
+                upper = pred.upper()
+                if upper.startswith('SELECT') or upper.startswith('WITH'):
+                    generated_sql_queries.append(pred)
+                else:
+                    qtext = extract_question_text(src)
+                    generated_sql_queries.append(best_retrieval_sql(qtext))
 
     os.makedirs(os.path.dirname(model_sql_path), exist_ok=True)
     os.makedirs(os.path.dirname(model_record_path), exist_ok=True)

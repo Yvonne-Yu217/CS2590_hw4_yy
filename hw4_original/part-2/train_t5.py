@@ -143,6 +143,10 @@ def eval_epoch(args, model, dev_loader, gt_sql_pth, model_sql_path, gt_record_pa
     # TODO
     from load_data import load_lines
 
+    def count_non_empty_lines(path):
+        with open(path, 'r') as f:
+            return sum(1 for line in f if line.strip() != '')
+
     train_nl = load_lines(os.path.join('data', 'train.nl'))
     train_sql = load_lines(os.path.join('data', 'train.sql'))
     token_pattern = re.compile(r"[A-Za-z0-9_']+")
@@ -307,7 +311,7 @@ def eval_epoch(args, model, dev_loader, gt_sql_pth, model_sql_path, gt_record_pa
     eval_loss = total_loss / max(total_tokens, 1)
 
     # Enforce exact alignment with dev examples before saving outputs.
-    expected_n = len(load_lines(gt_sql_pth))
+    expected_n = count_non_empty_lines(gt_sql_pth)
     if len(generated_sql_queries) < expected_n:
         fill_sql = best_retrieval_sql('')
         generated_sql_queries.extend([fill_sql] * (expected_n - len(generated_sql_queries)))
@@ -333,6 +337,10 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
     database records. Implementation should be very similar to eval_epoch.
     '''
     from load_data import load_lines
+
+    def count_non_empty_lines(path):
+        with open(path, 'r') as f:
+            return sum(1 for line in f if line.strip() != '')
 
     train_nl = load_lines(os.path.join('data', 'train.nl'))
     train_sql = load_lines(os.path.join('data', 'train.sql'))
@@ -476,7 +484,7 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
                     generated_sql_queries.append(best_retrieval_sql(qtext))
 
     # Enforce exact alignment with test examples before saving outputs.
-    expected_n = len(load_lines(os.path.join('data', 'test.nl')))
+    expected_n = count_non_empty_lines(os.path.join('data', 'test.nl'))
     if len(generated_sql_queries) < expected_n:
         fill_sql = best_retrieval_sql('')
         generated_sql_queries.extend([fill_sql] * (expected_n - len(generated_sql_queries)))

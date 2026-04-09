@@ -139,6 +139,15 @@ def eval_epoch(args, model, dev_loader, gt_sql_pth, model_sql_path, gt_record_pa
     we found the cross-entropy loss (in the evaluation set) to be well (albeit imperfectly) correlated with F1 performance.
     '''
     # TODO
+    def clean_generated_sql(text):
+        text = text.strip()
+        text = text.replace("SQL -", "").replace("SQL:", "").replace("SQL-", "").strip()
+        upper_text = text.upper()
+        select_pos = upper_text.find("SELECT")
+        if select_pos != -1:
+            text = text[select_pos:].strip()
+        return " ".join(text.split())
+
     model.eval()
     total_loss = 0
     total_tokens = 0
@@ -170,14 +179,12 @@ def eval_epoch(args, model, dev_loader, gt_sql_pth, model_sql_path, gt_record_pa
             generated = model.generate(
                 input_ids=encoder_input,
                 attention_mask=encoder_mask,
-                max_new_tokens=128,
-                num_beams=6,
-                no_repeat_ngram_size=3,
-                repetition_penalty=1.1,
+                max_new_tokens=96,
+                num_beams=4,
                 early_stopping=True,
             )
             decoded = tok.batch_decode(generated, skip_special_tokens=True)
-            generated_sql_queries.extend(decoded)
+            generated_sql_queries.extend([clean_generated_sql(x) for x in decoded])
 
     eval_loss = total_loss / max(total_tokens, 1)
 
@@ -199,6 +206,15 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
     You must implement inference to compute your model's generated SQL queries and its associated 
     database records. Implementation should be very similar to eval_epoch.
     '''
+    def clean_generated_sql(text):
+        text = text.strip()
+        text = text.replace("SQL -", "").replace("SQL:", "").replace("SQL-", "").strip()
+        upper_text = text.upper()
+        select_pos = upper_text.find("SELECT")
+        if select_pos != -1:
+            text = text[select_pos:].strip()
+        return " ".join(text.split())
+
     model.eval()
     generated_sql_queries = []
 
@@ -213,14 +229,12 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
             generated = model.generate(
                 input_ids=encoder_input,
                 attention_mask=encoder_mask,
-                max_new_tokens=128,
-                num_beams=6,
-                no_repeat_ngram_size=3,
-                repetition_penalty=1.1,
+                max_new_tokens=96,
+                num_beams=4,
                 early_stopping=True,
             )
             decoded = tok.batch_decode(generated, skip_special_tokens=True)
-            generated_sql_queries.extend(decoded)
+            generated_sql_queries.extend([clean_generated_sql(x) for x in decoded])
 
     os.makedirs(os.path.dirname(model_sql_path), exist_ok=True)
     os.makedirs(os.path.dirname(model_record_path), exist_ok=True)

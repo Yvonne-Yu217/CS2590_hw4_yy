@@ -260,6 +260,41 @@ def eval_epoch(args, model, dev_loader, gt_sql_pth, model_sql_path, gt_record_pa
                 deduped.append(tok)
         return " ".join(deduped)
 
+    def choose_best_sql(question_text, generated_candidates):
+        q_tokens = normalize_tokens(question_text)
+        q_content = q_tokens - stop_tokens
+        retrieval_sql = best_retrieval_sql(question_text)
+
+        candidates = [clean_generated_sql(x) for x in generated_candidates]
+        candidates.append(clean_generated_sql(retrieval_sql))
+
+        def score_sql(sql):
+            s = 0.0
+            upper = sql.upper()
+            if upper.startswith('SELECT') or upper.startswith('WITH'):
+                s += 2.0
+            if ' FROM ' in f' {upper} ':
+                s += 2.0
+            if upper.count('SELECT') > 1:
+                s -= 0.4 * (upper.count('SELECT') - 1)
+            if sql.count('(') != sql.count(')'):
+                s -= 0.8
+            if len(sql.split()) < 4:
+                s -= 1.0
+
+            sql_tokens = normalize_tokens(sql)
+            s += 0.20 * len(q_content & sql_tokens)
+
+            cue_words = {'from', 'to', 'between', 'after', 'before', 'on', 'in'}
+            if len(q_tokens & cue_words) > 0 and ' WHERE ' in f' {upper} ':
+                s += 0.25
+            return s
+
+        best = max(candidates, key=score_sql)
+        if is_sql_like(best):
+            return best
+        return retrieval_sql
+
     model.eval()
     total_loss = 0
     total_tokens = 0
@@ -288,11 +323,13 @@ def eval_epoch(args, model, dev_loader, gt_sql_pth, model_sql_path, gt_record_pa
             total_loss += loss.item() * num_tokens
             total_tokens += num_tokens
 
+            num_return_sequences = 4
             generated = model.generate(
                 input_ids=encoder_input,
                 attention_mask=encoder_mask,
                 max_new_tokens=256,
-                num_beams=4,
+                num_beams=8,
+                num_return_sequences=num_return_sequences,
                 do_sample=False,
                 repetition_penalty=1.0,
                 length_penalty=1.0,
@@ -300,13 +337,12 @@ def eval_epoch(args, model, dev_loader, gt_sql_pth, model_sql_path, gt_record_pa
             )
             decoded = tok.batch_decode(generated, skip_special_tokens=True)
             source_texts = tok.batch_decode(encoder_input, skip_special_tokens=True)
-            cleaned = [clean_generated_sql(x) for x in decoded]
-            for src, pred in zip(source_texts, cleaned):
-                if is_sql_like(pred):
-                    generated_sql_queries.append(pred)
-                else:
-                    qtext = extract_question_text(src)
-                    generated_sql_queries.append(best_retrieval_sql(qtext))
+            for i, src in enumerate(source_texts):
+                start = i * num_return_sequences
+                end = (i + 1) * num_return_sequences
+                cand_group = decoded[start:end]
+                qtext = extract_question_text(src)
+                generated_sql_queries.append(choose_best_sql(qtext, cand_group))
 
     eval_loss = total_loss / max(total_tokens, 1)
 
@@ -452,6 +488,41 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
                 deduped.append(tok)
         return " ".join(deduped)
 
+    def choose_best_sql(question_text, generated_candidates):
+        q_tokens = normalize_tokens(question_text)
+        q_content = q_tokens - stop_tokens
+        retrieval_sql = best_retrieval_sql(question_text)
+
+        candidates = [clean_generated_sql(x) for x in generated_candidates]
+        candidates.append(clean_generated_sql(retrieval_sql))
+
+        def score_sql(sql):
+            s = 0.0
+            upper = sql.upper()
+            if upper.startswith('SELECT') or upper.startswith('WITH'):
+                s += 2.0
+            if ' FROM ' in f' {upper} ':
+                s += 2.0
+            if upper.count('SELECT') > 1:
+                s -= 0.4 * (upper.count('SELECT') - 1)
+            if sql.count('(') != sql.count(')'):
+                s -= 0.8
+            if len(sql.split()) < 4:
+                s -= 1.0
+
+            sql_tokens = normalize_tokens(sql)
+            s += 0.20 * len(q_content & sql_tokens)
+
+            cue_words = {'from', 'to', 'between', 'after', 'before', 'on', 'in'}
+            if len(q_tokens & cue_words) > 0 and ' WHERE ' in f' {upper} ':
+                s += 0.25
+            return s
+
+        best = max(candidates, key=score_sql)
+        if is_sql_like(best):
+            return best
+        return retrieval_sql
+
     model.eval()
     generated_sql_queries = []
 
@@ -463,11 +534,13 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
             encoder_input = encoder_input.to(DEVICE)
             encoder_mask = encoder_mask.to(DEVICE)
 
+            num_return_sequences = 4
             generated = model.generate(
                 input_ids=encoder_input,
                 attention_mask=encoder_mask,
                 max_new_tokens=256,
-                num_beams=4,
+                num_beams=8,
+                num_return_sequences=num_return_sequences,
                 do_sample=False,
                 repetition_penalty=1.0,
                 length_penalty=1.0,
@@ -475,13 +548,12 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
             )
             decoded = tok.batch_decode(generated, skip_special_tokens=True)
             source_texts = tok.batch_decode(encoder_input, skip_special_tokens=True)
-            cleaned = [clean_generated_sql(x) for x in decoded]
-            for src, pred in zip(source_texts, cleaned):
-                if is_sql_like(pred):
-                    generated_sql_queries.append(pred)
-                else:
-                    qtext = extract_question_text(src)
-                    generated_sql_queries.append(best_retrieval_sql(qtext))
+            for i, src in enumerate(source_texts):
+                start = i * num_return_sequences
+                end = (i + 1) * num_return_sequences
+                cand_group = decoded[start:end]
+                qtext = extract_question_text(src)
+                generated_sql_queries.append(choose_best_sql(qtext, cand_group))
 
     # Enforce exact alignment with test examples before saving outputs.
     expected_n = count_non_empty_lines(os.path.join('data', 'test.nl'))

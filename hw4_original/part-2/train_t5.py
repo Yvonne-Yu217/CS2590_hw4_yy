@@ -218,7 +218,7 @@ def eval_epoch(args, model, dev_loader, gt_sql_pth, model_sql_path, gt_record_pa
                 w_union = sum(idf.get(t, 1.0) for t in union)
                 content_overlap = len(q_content & (c_tokens - stop_tokens))
                 score = (w_inter / w_union) if w_union > 0 else 0.0
-                score += 0.05 * content_overlap
+                score += 0.12 * content_overlap
             if score > best_score:
                 best_score = score
                 best_idx = i
@@ -275,6 +275,12 @@ def eval_epoch(args, model, dev_loader, gt_sql_pth, model_sql_path, gt_record_pa
                 s += 2.0
             if ' FROM ' in f' {upper} ':
                 s += 2.0
+            if ' WHERE ' in f' {upper} ':
+                s += 0.3
+            if ' ORDER BY ' in f' {upper} ':
+                s += 0.1
+            if ' GROUP BY ' in f' {upper} ':
+                s += 0.1
             if upper.count('SELECT') > 1:
                 s -= 0.4 * (upper.count('SELECT') - 1)
             if sql.count('(') != sql.count(')'):
@@ -283,11 +289,21 @@ def eval_epoch(args, model, dev_loader, gt_sql_pth, model_sql_path, gt_record_pa
                 s -= 1.0
 
             sql_tokens = normalize_tokens(sql)
-            s += 0.20 * len(q_content & sql_tokens)
+            s += 0.30 * len(q_content & sql_tokens)
 
             cue_words = {'from', 'to', 'between', 'after', 'before', 'on', 'in'}
             if len(q_tokens & cue_words) > 0 and ' WHERE ' in f' {upper} ':
                 s += 0.25
+
+            # Lightweight intent-to-operator alignment.
+            if any(w in q_tokens for w in {'how', 'many', 'number', 'count'}) and 'COUNT' in upper:
+                s += 0.35
+            if any(w in q_tokens for w in {'average', 'avg', 'mean'}) and 'AVG' in upper:
+                s += 0.30
+            if any(w in q_tokens for w in {'maximum', 'highest', 'largest', 'latest', 'max'}) and 'MAX' in upper:
+                s += 0.30
+            if any(w in q_tokens for w in {'minimum', 'lowest', 'smallest', 'earliest', 'min'}) and 'MIN' in upper:
+                s += 0.30
             return s
 
         best = max(candidates, key=score_sql)
@@ -323,16 +339,17 @@ def eval_epoch(args, model, dev_loader, gt_sql_pth, model_sql_path, gt_record_pa
             total_loss += loss.item() * num_tokens
             total_tokens += num_tokens
 
-            num_return_sequences = 4
+            num_return_sequences = 6
             generated = model.generate(
                 input_ids=encoder_input,
                 attention_mask=encoder_mask,
-                max_new_tokens=256,
-                num_beams=8,
+                max_new_tokens=192,
+                num_beams=10,
                 num_return_sequences=num_return_sequences,
                 do_sample=False,
-                repetition_penalty=1.0,
-                length_penalty=1.0,
+                repetition_penalty=1.15,
+                length_penalty=0.9,
+                no_repeat_ngram_size=3,
                 early_stopping=True,
             )
             decoded = tok.batch_decode(generated, skip_special_tokens=True)
@@ -448,7 +465,7 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
                 w_union = sum(idf.get(t, 1.0) for t in union)
                 content_overlap = len(q_content & (c_tokens - stop_tokens))
                 score = (w_inter / w_union) if w_union > 0 else 0.0
-                score += 0.05 * content_overlap
+                score += 0.12 * content_overlap
             if score > best_score:
                 best_score = score
                 best_idx = i
@@ -503,6 +520,12 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
                 s += 2.0
             if ' FROM ' in f' {upper} ':
                 s += 2.0
+            if ' WHERE ' in f' {upper} ':
+                s += 0.3
+            if ' ORDER BY ' in f' {upper} ':
+                s += 0.1
+            if ' GROUP BY ' in f' {upper} ':
+                s += 0.1
             if upper.count('SELECT') > 1:
                 s -= 0.4 * (upper.count('SELECT') - 1)
             if sql.count('(') != sql.count(')'):
@@ -511,11 +534,21 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
                 s -= 1.0
 
             sql_tokens = normalize_tokens(sql)
-            s += 0.20 * len(q_content & sql_tokens)
+            s += 0.30 * len(q_content & sql_tokens)
 
             cue_words = {'from', 'to', 'between', 'after', 'before', 'on', 'in'}
             if len(q_tokens & cue_words) > 0 and ' WHERE ' in f' {upper} ':
                 s += 0.25
+
+            # Lightweight intent-to-operator alignment.
+            if any(w in q_tokens for w in {'how', 'many', 'number', 'count'}) and 'COUNT' in upper:
+                s += 0.35
+            if any(w in q_tokens for w in {'average', 'avg', 'mean'}) and 'AVG' in upper:
+                s += 0.30
+            if any(w in q_tokens for w in {'maximum', 'highest', 'largest', 'latest', 'max'}) and 'MAX' in upper:
+                s += 0.30
+            if any(w in q_tokens for w in {'minimum', 'lowest', 'smallest', 'earliest', 'min'}) and 'MIN' in upper:
+                s += 0.30
             return s
 
         best = max(candidates, key=score_sql)
@@ -534,16 +567,17 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
             encoder_input = encoder_input.to(DEVICE)
             encoder_mask = encoder_mask.to(DEVICE)
 
-            num_return_sequences = 4
+            num_return_sequences = 6
             generated = model.generate(
                 input_ids=encoder_input,
                 attention_mask=encoder_mask,
-                max_new_tokens=256,
-                num_beams=8,
+                max_new_tokens=192,
+                num_beams=10,
                 num_return_sequences=num_return_sequences,
                 do_sample=False,
-                repetition_penalty=1.0,
-                length_penalty=1.0,
+                repetition_penalty=1.15,
+                length_penalty=0.9,
+                no_repeat_ngram_size=3,
                 early_stopping=True,
             )
             decoded = tok.batch_decode(generated, skip_special_tokens=True)

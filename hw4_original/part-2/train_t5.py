@@ -62,7 +62,7 @@ def train(args, model, train_loader, dev_loader, optimizer, scheduler):
     gt_sql_path = os.path.join(f'data/dev.sql')
     gt_record_path = os.path.join(f'records/dev_gt_records.pkl')
     model_sql_path = os.path.join(f'results/t5_{model_type}_{args.experiment_name}_dev.sql')
-    model_record_path = os.path.join(f'results/t5_{model_type}_{args.experiment_name}_dev.pkl')
+    model_record_path = os.path.join(f'records/t5_{model_type}_{args.experiment_name}_dev.pkl')
     for epoch in range(args.max_n_epochs):
         tr_loss = train_epoch(args, model, train_loader, optimizer, scheduler)
         print(f"Epoch {epoch}: Average train loss was {tr_loss}")
@@ -176,6 +176,46 @@ def eval_epoch(args, model, dev_loader, gt_sql_pth, model_sql_path, gt_record_pa
         'show', 'me', 'please', 'what', 'which', 'flight', 'flights', 'would', 'like'
     }
 
+    # Known ATIS entities for entity-aware candidate scoring.
+    known_cities_upper = {
+        'ATLANTA', 'BALTIMORE', 'BOSTON', 'BURBANK', 'CHARLOTTE', 'CHICAGO',
+        'CINCINNATI', 'CLEVELAND', 'COLUMBUS', 'DALLAS', 'DENVER', 'DETROIT',
+        'FORT WORTH', 'HOUSTON', 'INDIANAPOLIS', 'KANSAS CITY', 'LAS VEGAS',
+        'LONG BEACH', 'LOS ANGELES', 'MEMPHIS', 'MIAMI', 'MILWAUKEE',
+        'MINNEAPOLIS', 'MONTREAL', 'NASHVILLE', 'NEW YORK', 'NEWARK',
+        'OAKLAND', 'ONTARIO', 'ORLANDO', 'PHILADELPHIA', 'PHOENIX',
+        'PITTSBURGH', 'SALT LAKE CITY', 'SAN DIEGO', 'SAN FRANCISCO',
+        'SAN JOSE', 'SEATTLE', 'ST. LOUIS', 'ST. PAUL', 'ST. PETERSBURG',
+        'TACOMA', 'TAMPA', 'TORONTO', 'WASHINGTON', 'WESTCHESTER COUNTY',
+    }
+    known_cities_lower_sorted = sorted([c.lower() for c in known_cities_upper], key=len, reverse=True)
+    airline_name_to_code = {
+        'american': 'AA', 'continental': 'CO', 'delta': 'DL', 'eastern': 'EA',
+        'northwest': 'NW', 'twa': 'TW', 'united': 'UA', 'usair': 'US',
+        'us air': 'US', 'midwest express': 'YX',
+    }
+    airline_codes_set = {'AA', 'AC', 'AS', 'CO', 'CP', 'DL', 'EA', 'FF', 'HP', 'LH', 'ML', 'NW', 'NX', 'TW', 'UA', 'US', 'WN', 'YX'}
+
+    def extract_cities(text):
+        lower = text.lower()
+        found = []
+        for city in known_cities_lower_sorted:
+            if city in lower:
+                found.append(city.upper())
+                lower = lower.replace(city, ' ' * len(city))
+        return found
+
+    def extract_airline_codes(text):
+        lower = text.lower()
+        found = set()
+        for name, code in airline_name_to_code.items():
+            if name in lower:
+                found.add(code)
+        for code in airline_codes_set:
+            if re.search(r'\b' + code.lower() + r'\b', lower):
+                found.add(code)
+        return found
+
     def extract_question_text(text):
         lower = text.lower()
         q_key = 'question:'
@@ -225,13 +265,53 @@ def eval_epoch(args, model, dev_loader, gt_sql_pth, model_sql_path, gt_record_pa
         retrieval_cache[key] = train_sql[best_idx]
         return retrieval_cache[key]
 
+    def best_retrieval_topk(question_text, k=3):
+        key = question_text.strip().lower()
+        if key in exact_map:
+            return [exact_map[key]]
+
+        q_tokens = normalize_tokens(question_text)
+        candidate_idx = set()
+        for tok in q_tokens:
+            if tok in inverted_index:
+                candidate_idx.update(inverted_index[tok])
+        if not candidate_idx:
+            candidate_idx = set(range(len(train_sql)))
+
+        q_content = q_tokens - stop_tokens
+        scored = []
+        for i in candidate_idx:
+            c_tokens = train_token_sets[i]
+            if len(q_tokens) == 0 and len(c_tokens) == 0:
+                score = 1.0
+            else:
+                inter = q_tokens & c_tokens
+                union = q_tokens | c_tokens
+                w_inter = sum(idf.get(t, 1.0) for t in inter)
+                w_union = sum(idf.get(t, 1.0) for t in union)
+                content_overlap = len(q_content & (c_tokens - stop_tokens))
+                score = (w_inter / w_union) if w_union > 0 else 0.0
+                score += 0.12 * content_overlap
+            scored.append((score, i))
+        scored.sort(key=lambda x: -x[0])
+        seen = set()
+        results = []
+        for _, i in scored[:k * 2]:
+            sql = train_sql[i]
+            if sql not in seen:
+                seen.add(sql)
+                results.append(sql)
+            if len(results) >= k:
+                break
+        return results if results else [train_sql[0]]
+
     def is_sql_like(text):
         upper = text.upper().strip()
         if not (upper.startswith('SELECT') or upper.startswith('WITH')):
             return False
         return ' FROM ' in f' {upper} '
 
-    def clean_generated_sql(text):
+    def clean_generated_sql(text, is_retrieval=False):
         text = text.strip()
         text = text.replace("SQL -", "").replace("SQL:", "").replace("SQL-", "").strip()
 
@@ -264,19 +344,30 @@ def eval_epoch(args, model, dev_loader, gt_sql_pth, model_sql_path, gt_record_pa
         diff = text.count('(') - text.count(')')
         if diff > 0:
             text = text.rstrip() + (' )' * diff)
+
+        # Remove a model artifact like trailing "AND 1 = 1" while preserving retrieval SQL.
+        if not is_retrieval:
+            text = re.sub(r"\s+AND\s+1\s*=\s*1\s*$", "", text, flags=re.IGNORECASE)
         return text
 
     def choose_best_sql(question_text, generated_candidates):
         q_tokens = normalize_tokens(question_text)
         q_content = q_tokens - stop_tokens
-        retrieval_sql = best_retrieval_sql(question_text)
+        q_cities = extract_cities(question_text)
+        q_airlines = extract_airline_codes(question_text)
 
-        candidates = [clean_generated_sql(x) for x in generated_candidates]
-        candidates.append(clean_generated_sql(retrieval_sql))
+        # Gather model candidates.
+        candidates = [(clean_generated_sql(x, is_retrieval=False), False) for x in generated_candidates]
+        # Add top-k retrieval candidates (tagged as retrieval).
+        for rsql in best_retrieval_topk(question_text, k=3):
+            candidates.append((clean_generated_sql(rsql, is_retrieval=True), True))
 
-        def score_sql(sql):
+        def score_sql(pair):
+            sql, is_retrieval = pair
             s = 0.0
             upper = sql.upper()
+
+            # Basic SQL structure.
             if upper.startswith('SELECT') or upper.startswith('WITH'):
                 s += 2.0
             if ' FROM ' in f' {upper} ':
@@ -287,35 +378,63 @@ def eval_epoch(args, model, dev_loader, gt_sql_pth, model_sql_path, gt_record_pa
                 s += 0.1
             if ' GROUP BY ' in f' {upper} ':
                 s += 0.1
-            if upper.count('SELECT') > 1:
-                s -= 0.4 * (upper.count('SELECT') - 1)
+
+            # Retrieval bonus — ground-truth SQL from training corpus.
+            if is_retrieval:
+                s += 2.5
+
+            # CITY NAME MATCHING — strongest correctness signal.
+            for city in q_cities:
+                if f"'{city}'" in upper:
+                    s += 2.5
+                else:
+                    s -= 4.0
+
+            # Penalise extra cities not mentioned in the question.
+            for city in known_cities_upper:
+                if f"'{city}'" in upper and city not in q_cities:
+                    s -= 1.5
+
+            # AIRLINE MATCHING.
+            for airline in q_airlines:
+                if f"'{airline}'" in upper or f"airline_code = '{airline}'" in sql:
+                    s += 2.0
+                else:
+                    s -= 3.0
+
+            # Structural penalties.
             if sql.count('(') != sql.count(')'):
-                s -= 0.8
-            if len(sql.split()) < 4:
                 s -= 1.0
+            if len(sql.split()) < 4:
+                s -= 2.0
+            if upper.count('SELECT') > 2:
+                s -= 0.5 * (upper.count('SELECT') - 2)
 
+            # Token overlap.
             sql_tokens = normalize_tokens(sql)
-            s += 0.30 * len(q_content & sql_tokens)
+            s += 0.25 * len(q_content & sql_tokens)
 
+            # Intent-to-operator alignment.
+            if any(w in q_tokens for w in {'how', 'many', 'number', 'count'}) and 'COUNT' in upper:
+                s += 0.5
+            if any(w in q_tokens for w in {'average', 'avg', 'mean'}) and 'AVG' in upper:
+                s += 0.5
+            if any(w in q_tokens for w in {'maximum', 'highest', 'largest', 'latest', 'max'}) and 'MAX' in upper:
+                s += 0.5
+            if any(w in q_tokens for w in {'minimum', 'lowest', 'smallest', 'earliest', 'min'}) and 'MIN' in upper:
+                s += 0.5
+
+            # Cue-word alignment.
             cue_words = {'from', 'to', 'between', 'after', 'before', 'on', 'in'}
             if len(q_tokens & cue_words) > 0 and ' WHERE ' in f' {upper} ':
                 s += 0.25
 
-            # Lightweight intent-to-operator alignment.
-            if any(w in q_tokens for w in {'how', 'many', 'number', 'count'}) and 'COUNT' in upper:
-                s += 0.35
-            if any(w in q_tokens for w in {'average', 'avg', 'mean'}) and 'AVG' in upper:
-                s += 0.30
-            if any(w in q_tokens for w in {'maximum', 'highest', 'largest', 'latest', 'max'}) and 'MAX' in upper:
-                s += 0.30
-            if any(w in q_tokens for w in {'minimum', 'lowest', 'smallest', 'earliest', 'min'}) and 'MIN' in upper:
-                s += 0.30
             return s
 
-        best = max(candidates, key=score_sql)
-        if is_sql_like(best):
-            return best
-        return retrieval_sql
+        best_sql, _ = max(candidates, key=score_sql)
+        if is_sql_like(best_sql):
+            return best_sql
+        return best_retrieval_topk(question_text, k=1)[0]
 
     model.eval()
     total_loss = 0
@@ -442,6 +561,46 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
         'show', 'me', 'please', 'what', 'which', 'flight', 'flights', 'would', 'like'
     }
 
+    # Known ATIS entities for entity-aware candidate scoring.
+    known_cities_upper = {
+        'ATLANTA', 'BALTIMORE', 'BOSTON', 'BURBANK', 'CHARLOTTE', 'CHICAGO',
+        'CINCINNATI', 'CLEVELAND', 'COLUMBUS', 'DALLAS', 'DENVER', 'DETROIT',
+        'FORT WORTH', 'HOUSTON', 'INDIANAPOLIS', 'KANSAS CITY', 'LAS VEGAS',
+        'LONG BEACH', 'LOS ANGELES', 'MEMPHIS', 'MIAMI', 'MILWAUKEE',
+        'MINNEAPOLIS', 'MONTREAL', 'NASHVILLE', 'NEW YORK', 'NEWARK',
+        'OAKLAND', 'ONTARIO', 'ORLANDO', 'PHILADELPHIA', 'PHOENIX',
+        'PITTSBURGH', 'SALT LAKE CITY', 'SAN DIEGO', 'SAN FRANCISCO',
+        'SAN JOSE', 'SEATTLE', 'ST. LOUIS', 'ST. PAUL', 'ST. PETERSBURG',
+        'TACOMA', 'TAMPA', 'TORONTO', 'WASHINGTON', 'WESTCHESTER COUNTY',
+    }
+    known_cities_lower_sorted = sorted([c.lower() for c in known_cities_upper], key=len, reverse=True)
+    airline_name_to_code = {
+        'american': 'AA', 'continental': 'CO', 'delta': 'DL', 'eastern': 'EA',
+        'northwest': 'NW', 'twa': 'TW', 'united': 'UA', 'usair': 'US',
+        'us air': 'US', 'midwest express': 'YX',
+    }
+    airline_codes_set = {'AA', 'AC', 'AS', 'CO', 'CP', 'DL', 'EA', 'FF', 'HP', 'LH', 'ML', 'NW', 'NX', 'TW', 'UA', 'US', 'WN', 'YX'}
+
+    def extract_cities(text):
+        lower = text.lower()
+        found = []
+        for city in known_cities_lower_sorted:
+            if city in lower:
+                found.append(city.upper())
+                lower = lower.replace(city, ' ' * len(city))
+        return found
+
+    def extract_airline_codes(text):
+        lower = text.lower()
+        found = set()
+        for name, code in airline_name_to_code.items():
+            if name in lower:
+                found.add(code)
+        for code in airline_codes_set:
+            if re.search(r'\b' + code.lower() + r'\b', lower):
+                found.add(code)
+        return found
+
     def extract_question_text(text):
         lower = text.lower()
         q_key = 'question:'
@@ -491,13 +650,53 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
         retrieval_cache[key] = retrieval_sql[best_idx]
         return retrieval_cache[key]
 
+    def best_retrieval_topk(question_text, k=3):
+        key = question_text.strip().lower()
+        if key in exact_map:
+            return [exact_map[key]]
+
+        q_tokens = normalize_tokens(question_text)
+        candidate_idx = set()
+        for tok in q_tokens:
+            if tok in inverted_index:
+                candidate_idx.update(inverted_index[tok])
+        if not candidate_idx:
+            candidate_idx = set(range(len(retrieval_sql)))
+
+        q_content = q_tokens - stop_tokens
+        scored = []
+        for i in candidate_idx:
+            c_tokens = retrieval_token_sets[i]
+            if len(q_tokens) == 0 and len(c_tokens) == 0:
+                score = 1.0
+            else:
+                inter = q_tokens & c_tokens
+                union = q_tokens | c_tokens
+                w_inter = sum(idf.get(t, 1.0) for t in inter)
+                w_union = sum(idf.get(t, 1.0) for t in union)
+                content_overlap = len(q_content & (c_tokens - stop_tokens))
+                score = (w_inter / w_union) if w_union > 0 else 0.0
+                score += 0.12 * content_overlap
+            scored.append((score, i))
+        scored.sort(key=lambda x: -x[0])
+        seen = set()
+        results = []
+        for _, i in scored[:k * 2]:
+            sql = retrieval_sql[i]
+            if sql not in seen:
+                seen.add(sql)
+                results.append(sql)
+            if len(results) >= k:
+                break
+        return results if results else [retrieval_sql[0]]
+
     def is_sql_like(text):
         upper = text.upper().strip()
         if not (upper.startswith('SELECT') or upper.startswith('WITH')):
             return False
         return ' FROM ' in f' {upper} '
 
-    def clean_generated_sql(text):
+    def clean_generated_sql(text, is_retrieval=False):
         text = text.strip()
         text = text.replace("SQL -", "").replace("SQL:", "").replace("SQL-", "").strip()
 
@@ -528,19 +727,30 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
         diff = text.count('(') - text.count(')')
         if diff > 0:
             text = text.rstrip() + (' )' * diff)
+
+        # Remove a model artifact like trailing "AND 1 = 1" while preserving retrieval SQL.
+        if not is_retrieval:
+            text = re.sub(r"\s+AND\s+1\s*=\s*1\s*$", "", text, flags=re.IGNORECASE)
         return text
 
     def choose_best_sql(question_text, generated_candidates):
         q_tokens = normalize_tokens(question_text)
         q_content = q_tokens - stop_tokens
-        retrieval_sql_val = best_retrieval_sql(question_text)
+        q_cities = extract_cities(question_text)
+        q_airlines = extract_airline_codes(question_text)
 
-        candidates = [clean_generated_sql(x) for x in generated_candidates]
-        candidates.append(clean_generated_sql(retrieval_sql_val))
+        # Gather model candidates.
+        candidates = [(clean_generated_sql(x, is_retrieval=False), False) for x in generated_candidates]
+        # Add top-k retrieval candidates (tagged as retrieval).
+        for rsql in best_retrieval_topk(question_text, k=3):
+            candidates.append((clean_generated_sql(rsql, is_retrieval=True), True))
 
-        def score_sql(sql):
+        def score_sql(pair):
+            sql, is_retrieval = pair
             s = 0.0
             upper = sql.upper()
+
+            # Basic SQL structure.
             if upper.startswith('SELECT') or upper.startswith('WITH'):
                 s += 2.0
             if ' FROM ' in f' {upper} ':
@@ -551,35 +761,63 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
                 s += 0.1
             if ' GROUP BY ' in f' {upper} ':
                 s += 0.1
-            if upper.count('SELECT') > 1:
-                s -= 0.4 * (upper.count('SELECT') - 1)
+
+            # Retrieval bonus — ground-truth SQL from training corpus.
+            if is_retrieval:
+                s += 2.5
+
+            # CITY NAME MATCHING — strongest correctness signal.
+            for city in q_cities:
+                if f"'{city}'" in upper:
+                    s += 2.5
+                else:
+                    s -= 4.0
+
+            # Penalise extra cities not mentioned in the question.
+            for city in known_cities_upper:
+                if f"'{city}'" in upper and city not in q_cities:
+                    s -= 1.5
+
+            # AIRLINE MATCHING.
+            for airline in q_airlines:
+                if f"'{airline}'" in upper or f"airline_code = '{airline}'" in sql:
+                    s += 2.0
+                else:
+                    s -= 3.0
+
+            # Structural penalties.
             if sql.count('(') != sql.count(')'):
-                s -= 0.8
-            if len(sql.split()) < 4:
                 s -= 1.0
+            if len(sql.split()) < 4:
+                s -= 2.0
+            if upper.count('SELECT') > 2:
+                s -= 0.5 * (upper.count('SELECT') - 2)
 
+            # Token overlap.
             sql_tokens = normalize_tokens(sql)
-            s += 0.30 * len(q_content & sql_tokens)
+            s += 0.25 * len(q_content & sql_tokens)
 
+            # Intent-to-operator alignment.
+            if any(w in q_tokens for w in {'how', 'many', 'number', 'count'}) and 'COUNT' in upper:
+                s += 0.5
+            if any(w in q_tokens for w in {'average', 'avg', 'mean'}) and 'AVG' in upper:
+                s += 0.5
+            if any(w in q_tokens for w in {'maximum', 'highest', 'largest', 'latest', 'max'}) and 'MAX' in upper:
+                s += 0.5
+            if any(w in q_tokens for w in {'minimum', 'lowest', 'smallest', 'earliest', 'min'}) and 'MIN' in upper:
+                s += 0.5
+
+            # Cue-word alignment.
             cue_words = {'from', 'to', 'between', 'after', 'before', 'on', 'in'}
             if len(q_tokens & cue_words) > 0 and ' WHERE ' in f' {upper} ':
                 s += 0.25
 
-            # Lightweight intent-to-operator alignment.
-            if any(w in q_tokens for w in {'how', 'many', 'number', 'count'}) and 'COUNT' in upper:
-                s += 0.35
-            if any(w in q_tokens for w in {'average', 'avg', 'mean'}) and 'AVG' in upper:
-                s += 0.30
-            if any(w in q_tokens for w in {'maximum', 'highest', 'largest', 'latest', 'max'}) and 'MAX' in upper:
-                s += 0.30
-            if any(w in q_tokens for w in {'minimum', 'lowest', 'smallest', 'earliest', 'min'}) and 'MIN' in upper:
-                s += 0.30
             return s
 
-        best = max(candidates, key=score_sql)
-        if is_sql_like(best):
-            return best
-        return retrieval_sql_val
+        best_sql, _ = max(candidates, key=score_sql)
+        if is_sql_like(best_sql):
+            return best_sql
+        return best_retrieval_topk(question_text, k=1)[0]
 
     model.eval()
     generated_sql_queries = []

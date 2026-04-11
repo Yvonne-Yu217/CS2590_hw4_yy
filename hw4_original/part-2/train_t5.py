@@ -258,7 +258,13 @@ def eval_epoch(args, model, dev_loader, gt_sql_pth, model_sql_path, gt_record_pa
                 repeat = 1
             if repeat <= 1:
                 deduped.append(tok)
-        return " ".join(deduped)
+        text = " ".join(deduped)
+
+        # Balance parentheses — append missing closing parens.
+        diff = text.count('(') - text.count(')')
+        if diff > 0:
+            text = text.rstrip() + (' )' * diff)
+        return text
 
     def choose_best_sql(question_text, generated_candidates):
         q_tokens = normalize_tokens(question_text)
@@ -516,7 +522,13 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
                 repeat = 1
             if repeat <= 1:
                 deduped.append(tok)
-        return " ".join(deduped)
+        text = " ".join(deduped)
+
+        # Balance parentheses — append missing closing parens.
+        diff = text.count('(') - text.count(')')
+        if diff > 0:
+            text = text.rstrip() + (' )' * diff)
+        return text
 
     def choose_best_sql(question_text, generated_candidates):
         q_tokens = normalize_tokens(question_text)

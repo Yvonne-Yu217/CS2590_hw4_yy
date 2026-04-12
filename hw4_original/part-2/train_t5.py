@@ -377,6 +377,30 @@ def eval_epoch(args, model, dev_loader, gt_sql_pth, model_sql_path, gt_record_pa
         for rsql in best_retrieval_topk(question_text, k=5):
             candidates.append((clean_generated_sql(rsql, is_retrieval=True), True))
 
+        # Penalize timeout-prone SQL shape (very long, many joins, deep nesting).
+        def timeout_risk(sql):
+            upper = sql.upper()
+            token_len = len(sql.split())
+            from_part = upper.split(' WHERE ')[0]
+            join_count = from_part.count(',')
+            select_count = upper.count('SELECT')
+            and_count = upper.count(' AND ')
+
+            risk = 0.0
+            if token_len > 120:
+                risk += (token_len - 120) / 20.0
+            if join_count > 5:
+                risk += 0.8 * (join_count - 5)
+            if select_count > 2:
+                risk += 1.0 * (select_count - 2)
+            if and_count > 10:
+                risk += 0.25 * (and_count - 10)
+            if 'DATE_DAY' in upper and 'DAYS ' in upper and join_count >= 6:
+                risk += 1.2
+            if ' STOPS ' in f' {upper} ' and join_count >= 6:
+                risk += 0.8
+            return risk
+
         def score_sql(pair):
             sql, is_retrieval = pair
             s = 0.0
@@ -431,6 +455,14 @@ def eval_epoch(args, model, dev_loader, gt_sql_pth, model_sql_path, gt_record_pa
                 s -= 1.0
             if n_tokens > 180:
                 s -= 1.5
+
+            # Explicit timeout risk penalty.
+            risk = timeout_risk(sql)
+            s -= 1.4 * risk
+
+            # Favor safe retrieval candidates when scores are close.
+            if is_retrieval and risk < 1.5:
+                s += 0.6
 
             # Token overlap.
             sql_tokens = normalize_tokens(sql)
@@ -782,6 +814,30 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
         for rsql in best_retrieval_topk(question_text, k=5):
             candidates.append((clean_generated_sql(rsql, is_retrieval=True), True))
 
+        # Penalize timeout-prone SQL shape (very long, many joins, deep nesting).
+        def timeout_risk(sql):
+            upper = sql.upper()
+            token_len = len(sql.split())
+            from_part = upper.split(' WHERE ')[0]
+            join_count = from_part.count(',')
+            select_count = upper.count('SELECT')
+            and_count = upper.count(' AND ')
+
+            risk = 0.0
+            if token_len > 120:
+                risk += (token_len - 120) / 20.0
+            if join_count > 5:
+                risk += 0.8 * (join_count - 5)
+            if select_count > 2:
+                risk += 1.0 * (select_count - 2)
+            if and_count > 10:
+                risk += 0.25 * (and_count - 10)
+            if 'DATE_DAY' in upper and 'DAYS ' in upper and join_count >= 6:
+                risk += 1.2
+            if ' STOPS ' in f' {upper} ' and join_count >= 6:
+                risk += 0.8
+            return risk
+
         def score_sql(pair):
             sql, is_retrieval = pair
             s = 0.0
@@ -836,6 +892,14 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
                 s -= 1.0
             if n_tokens > 180:
                 s -= 1.5
+
+            # Explicit timeout risk penalty.
+            risk = timeout_risk(sql)
+            s -= 1.4 * risk
+
+            # Favor safe retrieval candidates when scores are close.
+            if is_retrieval and risk < 1.5:
+                s += 0.6
 
             # Token overlap.
             sql_tokens = normalize_tokens(sql)
